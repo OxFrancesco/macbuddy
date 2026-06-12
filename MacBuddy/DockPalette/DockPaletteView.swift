@@ -6,6 +6,10 @@ struct DockPaletteView: View {
     var body: some View {
         VStack(spacing: 0) {
             DockPaletteControls(model: model)
+            if model.needsAppManagementPermission {
+                DockPermissionBanner(onOpenSettings: model.openPermissionSettings)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             Divider()
             DockAppGrid(model: model)
             Divider()

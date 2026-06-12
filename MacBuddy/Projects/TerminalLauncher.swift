@@ -92,7 +92,10 @@ enum TerminalLauncher {
         let path = directory.path(percentEncoded: false)
         return switch terminal {
         case .ghostty:
-            ["--working-directory=\(path)", "-e", scriptPath]
+            // -e applies the command to every surface, and a fresh instance
+            // restores the previous session's windows — together that runs the
+            // command twice. initial-command only affects the first surface.
+            ["--working-directory=\(path)", "--window-save-state=never", "--initial-command=\(scriptPath)"]
         case .alacritty:
             ["--working-directory", path, "-e", scriptPath]
         case .kitty:
