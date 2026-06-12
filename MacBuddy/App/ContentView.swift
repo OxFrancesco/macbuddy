@@ -115,6 +115,7 @@ private struct SwitchLabel: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .onHover { isHovered = $0 }
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }

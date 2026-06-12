@@ -55,9 +55,9 @@ struct ProjectsView: View {
     private func launchCard(settings: Bindable<AppSettings>) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionLabel("Launch")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 12, alignment: .leading)], alignment: .leading, spacing: 12) {
                 ForEach(TerminalApp.allCases) { terminal in
-                    TerminalPill(
+                    TerminalOption(
                         terminal: terminal,
                         isSelected: settings.wrappedValue.terminal == terminal,
                         action: { settings.wrappedValue.terminal = terminal }
@@ -85,10 +85,6 @@ struct ProjectsView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .help("Insert a common harness command — it runs inside the new project folder")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(Theme.terminalBlack, in: .rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.stroke))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .themeCard()
@@ -152,9 +148,10 @@ struct ProjectsView: View {
     }
 }
 
-// MARK: - Terminal pill
+// MARK: - Terminal option
 
-private struct TerminalPill: View {
+/// Bare text option — the selection is carried by color and weight alone.
+private struct TerminalOption: View {
     let terminal: TerminalApp
     let isSelected: Bool
     let action: () -> Void
@@ -163,25 +160,17 @@ private struct TerminalPill: View {
         Button(action: action) {
             Text(terminal.displayName)
                 .font(Theme.mono(11, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(pillForeground)
+                .foregroundStyle(foreground)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(
-                    isSelected ? Theme.amber.opacity(0.12) : Color.white.opacity(0.03),
-                    in: .rect(cornerRadius: 7)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(isSelected ? Theme.amber.opacity(0.4) : Theme.stroke)
-                )
+                .padding(.vertical, 2)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .help(terminal.isInstalled ? terminal.displayName : "\(terminal.displayName) is not installed")
     }
 
-    private var pillForeground: Color {
+    private var foreground: Color {
         if isSelected { return Theme.amber }
         return terminal.isInstalled ? Theme.textSecondary : Theme.textTertiary.opacity(0.6)
     }
