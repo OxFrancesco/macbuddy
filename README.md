@@ -32,6 +32,7 @@ First launch with Terminal/iTerm2 triggers the macOS **Automation** permission p
 ## Dock Palette
 
 - Reads the apps pinned in your Dock from `com.apple.dock` preferences and shows live styled previews.
+- Styles: **Noir** (grayscale), **B&W** (pure two-tone `#FEFEFE`/`#030303`, no gradient), **Tint** (any color), **Sepia**, **Pastel** — plus an intensity slider.
 - **Apply to Dock** writes a custom icon onto each app bundle (the standard Finder custom-icon mechanism, like Pictogram/LiteIcon), then restarts the Dock.
 - **Restore Originals** removes the custom icons and restarts the Dock.
 

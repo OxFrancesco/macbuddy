@@ -1,8 +1,11 @@
 import AppKit
 
 /// Opens the chosen terminal in a directory and injects the configured command.
-/// Terminal.app and iTerm2 are driven via AppleScript; the rest accept CLI
-/// arguments through `open -n -b <bundle-id> --args`.
+/// Terminal.app and iTerm2 are driven via AppleScript. The CLI terminals get a
+/// single-token executable launch script via `open -n -b <bundle-id> --args`:
+/// Ghostty's macOS launcher space-joins multi-token `-e` commands without
+/// preserving quoting, so anything with embedded spaces or semicolons gets
+/// mangled — a zero-argument script sidesteps that entirely.
 enum TerminalLauncher {
     static func launch(_ terminal: TerminalApp, at directory: URL, command rawCommand: String) throws {
         guard terminal.isInstalled else {
@@ -22,7 +25,7 @@ enum TerminalLauncher {
     // MARK: - AppleScript terminals
 
     private static func shellLine(directory: URL, command: String) -> String {
-        let quotedPath = "'" + directory.path(percentEncoded: false).replacing("'", with: "'\\''") + "'"
+        let quotedPath = shellQuoted(directory.path(percentEncoded: false))
         return command.isEmpty ? "cd \(quotedPath)" : "cd \(quotedPath) && \(command)"
     }
 
@@ -72,8 +75,9 @@ enum TerminalLauncher {
     // MARK: - CLI terminals
 
     private static func openViaLaunchServices(_ terminal: TerminalApp, directory: URL, command: String) throws {
+        let scriptPath = try writeLaunchScript(directory: directory, command: command)
         var arguments = ["-n", "-b", terminal.bundleIdentifier, "--args"]
-        arguments += terminalArguments(terminal, directory: directory, command: command)
+        arguments += terminalArguments(terminal, directory: directory, scriptPath: scriptPath)
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/open")
         process.arguments = arguments
@@ -84,28 +88,45 @@ enum TerminalLauncher {
         }
     }
 
-    private static func terminalArguments(_ terminal: TerminalApp, directory: URL, command: String) -> [String] {
+    private static func terminalArguments(_ terminal: TerminalApp, directory: URL, scriptPath: String) -> [String] {
         let path = directory.path(percentEncoded: false)
-        let shellCommand = command.isEmpty ? nil : shellInvocation(for: command)
         return switch terminal {
         case .ghostty:
-            ["--working-directory=\(path)"] + (shellCommand.map { ["-e"] + $0 } ?? [])
+            ["--working-directory=\(path)", "-e", scriptPath]
         case .alacritty:
-            ["--working-directory", path] + (shellCommand.map { ["-e"] + $0 } ?? [])
+            ["--working-directory", path, "-e", scriptPath]
         case .kitty:
-            ["--directory", path] + (shellCommand ?? [])
+            ["--directory", path, scriptPath]
         case .wezterm:
-            ["start", "--cwd", path] + (shellCommand.map { ["--"] + $0 } ?? [])
+            ["start", "--cwd", path, "--", scriptPath]
         case .terminal, .iterm2:
             []
         }
     }
 
-    /// Runs the command in an interactive login shell so PATH additions from
-    /// the user's profile (bun, npm, homebrew) are available, then drops back
-    /// into a shell so the window survives the command exiting.
-    private static func shellInvocation(for command: String) -> [String] {
+    /// Writes a self-contained launch script: cd into the project, run the
+    /// command in an interactive login shell (so PATH and aliases from the
+    /// user's profile apply), then drop into a shell so the window stays open.
+    private static func writeLaunchScript(directory: URL, command: String) throws -> String {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        return [shell, "-i", "-l", "-c", "\(command); exec \(shell) -i -l"]
+        let quotedDirectory = shellQuoted(directory.path(percentEncoded: false))
+        var lines = ["#!/bin/zsh", "cd \(quotedDirectory) || exit 1"]
+        if command.isEmpty {
+            lines.append("exec \(shell) -i -l")
+        } else {
+            let payload = shellQuoted("\(command); exec \(shell) -i -l")
+            lines.append("exec \(shell) -i -l -c \(payload)")
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "MacBuddy-launch-\(UUID().uuidString.prefix(8)).zsh")
+        try lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8)
+        let path = url.path(percentEncoded: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    private static func shellQuoted(_ string: String) -> String {
+        "'" + string.replacing("'", with: "'\\''") + "'"
     }
 }

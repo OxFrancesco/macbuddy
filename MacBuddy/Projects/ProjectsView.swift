@@ -3,6 +3,7 @@ import SwiftUI
 struct ProjectsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(NewProjectCoordinator.self) private var coordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isChoosingFolder = false
 
     private let commandPresets = ["claude", "claude --dangerously-skip-permissions", "codex", "gemini", "opencode"]
@@ -12,9 +13,19 @@ struct ProjectsView: View {
         Form {
             Section("Projects folder") {
                 LabeledContent("Location") {
-                    Text(settings.projectsFolder?.path(percentEncoded: false) ?? "Not set")
-                        .foregroundStyle(settings.projectsFolder == nil ? .secondary : .primary)
-                        .truncationMode(.middle)
+                    HStack(spacing: 8) {
+                        if settings.projectsFolder != nil {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                                .accessibilityLabel("Folder set")
+                        }
+                        Text(settings.projectsFolder?.path(percentEncoded: false) ?? "Not set")
+                            .foregroundStyle(settings.projectsFolder == nil ? .secondary : .primary)
+                            .truncationMode(.middle)
+                            .contentTransition(.opacity)
+                    }
+                    .animation(reduceMotion ? .easeInOut(duration: 0.2) : .bouncy(duration: 0.4), value: settings.projectsFolder)
                 }
                 Button("Choose Folder…", systemImage: "folder", action: chooseFolder)
             }

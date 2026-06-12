@@ -6,20 +6,30 @@ struct DockAppCell: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            iconImage
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 64, height: 64)
-                .overlay(alignment: .bottomTrailing) {
-                    if !app.isCustomizable {
-                        Image(systemName: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(4)
-                            .background(.thickMaterial, in: .circle)
-                    }
+            ZStack {
+                baseImage
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                if let preview {
+                    Image(decorative: preview.image, scale: 2)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .id(ObjectIdentifier(preview.image))
+                        .transition(.opacity)
                 }
+            }
+            .frame(width: 64, height: 64)
+            .overlay(alignment: .bottomTrailing) {
+                if !app.isCustomizable {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                        .background(.thickMaterial, in: .circle)
+                }
+            }
             Text(app.name)
                 .font(.caption)
                 .lineLimit(1)
@@ -31,10 +41,8 @@ struct DockAppCell: View {
         .accessibilityLabel(app.name)
     }
 
-    private var iconImage: Image {
-        if let preview {
-            Image(decorative: preview.image, scale: 2)
-        } else if let source = app.previewSource {
+    private var baseImage: Image {
+        if let source = app.previewSource {
             Image(decorative: source.image, scale: 2)
         } else {
             Image(systemName: "app.dashed")

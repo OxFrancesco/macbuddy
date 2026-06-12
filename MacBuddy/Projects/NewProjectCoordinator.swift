@@ -75,6 +75,7 @@ final class NewProjectCoordinator {
         do {
             let projectURL = try ProjectNamer.createProject(named: name, in: folder)
             try TerminalLauncher.launch(settings.terminal, at: projectURL, command: settings.command)
+            ToastPresenter.show(message: "\(name) created — opening \(settings.terminal.displayName)")
         } catch {
             presentError(error.localizedDescription)
         }

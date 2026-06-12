@@ -16,6 +16,7 @@ struct DockPaletteFooter: View {
             if model.isBusy {
                 ProgressView()
                     .controlSize(.small)
+                    .transition(.opacity)
             }
 
             Spacer()
@@ -25,8 +26,12 @@ struct DockPaletteFooter: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .contentTransition(.opacity)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: model.isBusy)
+        .animation(.easeInOut(duration: 0.2), value: model.statusMessage)
         .padding(16)
         .confirmationDialog("Apply styled icons to your Dock?", isPresented: $isConfirmingApply) {
             Button("Apply", action: startApply)

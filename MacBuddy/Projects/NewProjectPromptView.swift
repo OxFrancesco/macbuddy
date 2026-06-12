@@ -5,7 +5,9 @@ struct NewProjectPromptView: View {
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var name: String
+    @State private var hasAppeared = false
     @FocusState private var isNameFocused: Bool
 
     init(folder: URL, suggestedName: String, onSubmit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
@@ -44,9 +46,18 @@ struct NewProjectPromptView: View {
         .padding(24)
         .frame(width: 480)
         .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .scaleEffect(hasAppeared || reduceMotion ? 1 : 0.94)
+        .opacity(hasAppeared ? 1 : 0)
         .onExitCommand(perform: onCancel)
         .defaultFocus($isNameFocused, true)
-        .task { isNameFocused = true }
+        .task { animateIn() }
+    }
+
+    private func animateIn() {
+        isNameFocused = true
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.3)) {
+            hasAppeared = true
+        }
     }
 
     private var trimmedName: String {

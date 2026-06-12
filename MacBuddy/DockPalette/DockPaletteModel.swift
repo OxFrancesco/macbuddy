@@ -52,7 +52,9 @@ final class DockPaletteModel {
             if Task.isCancelled { return }
             guard let source = app.previewSource else { continue }
             if let styled = await IconStyler.render(source: source, style: style, tint: tintColor, intensity: intensity) {
-                previews[app.id] = styled
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    previews[app.id] = styled
+                }
             }
         }
     }
@@ -79,7 +81,10 @@ final class DockPaletteModel {
         styledPaths = Array(Set(styledPaths).union(appliedPaths))
         defaults.set(styledPaths, forKey: Self.styledPathsKey)
         DockIconApplier.relaunchDock()
-        statusMessage = statusText(applied: appliedPaths.count, failures: failures)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            statusMessage = statusText(applied: appliedPaths.count, failures: failures)
+        }
+        ToastPresenter.show(message: "Dock restyled — \(appliedPaths.count) icons updated", systemImage: "paintpalette.fill")
     }
 
     func restoreOriginalIcons() {

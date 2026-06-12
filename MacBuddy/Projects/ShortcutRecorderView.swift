@@ -7,8 +7,19 @@ struct ShortcutRecorderView: View {
     var body: some View {
         HStack(spacing: 8) {
             Button(action: toggleRecording) {
-                Text(buttonTitle)
-                    .frame(minWidth: 140)
+                HStack(spacing: 6) {
+                    if isRecording {
+                        Image(systemName: "record.circle")
+                            .foregroundStyle(.red)
+                            .symbolEffect(.pulse, options: .repeating, isActive: isRecording)
+                            .transition(.scale.combined(with: .opacity))
+                            .accessibilityHidden(true)
+                    }
+                    Text(buttonTitle)
+                        .contentTransition(.opacity)
+                }
+                .frame(minWidth: 140)
+                .animation(.easeInOut(duration: 0.2), value: isRecording)
             }
             .background {
                 ShortcutCaptureView(isRecording: $isRecording, onEvent: handleRecordedEvent)
