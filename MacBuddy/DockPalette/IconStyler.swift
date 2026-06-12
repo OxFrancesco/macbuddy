@@ -22,6 +22,9 @@ nonisolated enum IconStyler {
 
     private static func filteredImage(for input: CIImage, style: IconStyle, tint: TintColor) -> CIImage {
         switch style {
+        case .ai:
+            // Generative styling happens in AIIconStylist; never reached here.
+            return input
         case .noir:
             let filter = CIFilter.photoEffectNoir()
             filter.inputImage = input

@@ -15,7 +15,11 @@ struct DockAppGrid: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 16)], spacing: 24) {
                     ForEach(model.apps) { app in
-                        DockAppCell(app: app, preview: model.previews[app.id])
+                        DockAppCell(
+                            app: app,
+                            preview: model.previews[app.id],
+                            isGenerating: model.generatingPaths.contains(app.path)
+                        )
                     }
                 }
                 .padding(24)

@@ -2,10 +2,10 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Owns the hotkey-triggered flow: floating name prompt → create folder →
-/// launch the configured terminal with the configured command.
+/// Owns the hotkey-triggered flow: floating fuzzy search over existing
+/// projects → launch the configured terminal in the chosen folder.
 @Observable
-final class NewProjectCoordinator {
+final class OpenProjectCoordinator {
     private let settings: AppSettings
     private var panel: KeyablePanel?
 
@@ -13,7 +13,7 @@ final class NewProjectCoordinator {
         self.settings = settings
     }
 
-    func promptForNewProject() {
+    func promptForProject() {
         if let panel {
             panel.makeKeyAndOrderFront(nil)
             return
@@ -23,25 +23,29 @@ final class NewProjectCoordinator {
             presentError("Choose a projects folder in MacBuddy's Projects tab first.")
             return
         }
-        presentPanel(for: folder)
+        let projects = ProjectScanner.entries(in: folder)
+        guard !projects.isEmpty else {
+            presentError("No projects in \(folder.lastPathComponent) yet. Create one first.")
+            return
+        }
+        presentPanel(projects: projects)
     }
 
-    private func presentPanel(for folder: URL) {
-        let prompt = NewProjectPromptView(
-            folder: folder,
-            suggestedName: ProjectNamer.suggestedName(in: folder),
-            onSubmit: { [weak self] name in self?.createProject(named: name, in: folder) },
+    private func presentPanel(projects: [ProjectEntry]) {
+        let search = ProjectSearchView(
+            projects: projects,
+            terminalName: settings.terminal.displayName,
+            onSelect: { [weak self] entry in self?.open(entry) },
             onCancel: { [weak self] in self?.dismissPanel() }
         )
-        panel = KeyablePanel.present(prompt) { [weak self] in self?.dismissPanel() }
+        panel = KeyablePanel.present(search) { [weak self] in self?.dismissPanel() }
     }
 
-    private func createProject(named name: String, in folder: URL) {
+    private func open(_ entry: ProjectEntry) {
         dismissPanel()
         do {
-            let projectURL = try ProjectNamer.createProject(named: name, in: folder)
-            try TerminalLauncher.launch(settings.terminal, at: projectURL, command: settings.command)
-            ToastPresenter.show(message: "\(name) created — opening \(settings.terminal.displayName)")
+            try TerminalLauncher.launch(settings.terminal, at: entry.url, command: settings.command)
+            ToastPresenter.show(message: "Opening \(entry.name) in \(settings.terminal.displayName)")
         } catch {
             presentError(error.localizedDescription)
         }

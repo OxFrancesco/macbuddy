@@ -7,17 +7,26 @@ struct ToastView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .foregroundStyle(.green)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.phosphorGreen)
             Text(message)
-                .font(.callout)
+                .font(Theme.mono(12))
+                .foregroundStyle(Theme.textPrimary)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: .capsule)
+        .padding(.vertical, 9)
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().fill(Theme.bg.opacity(0.72)))
+                .overlay(Capsule().strokeBorder(Theme.strokeBright))
+        }
+        .preferredColorScheme(.dark)
     }
 }
 
 #Preview {
     ToastView(message: "project-3 created — opening Ghostty", systemImage: "checkmark.circle.fill")
         .padding(24)
+        .background(ThemeBackground())
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct DockAppCell: View {
     let app: DockApp
     let preview: IconBitmap?
+    var isGenerating = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -19,8 +20,15 @@ struct DockAppCell: View {
                         .id(ObjectIdentifier(preview.image))
                         .transition(.opacity)
                 }
+                if isGenerating {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(.black.opacity(0.45))
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
             .frame(width: 64, height: 64)
+            .animation(.easeInOut(duration: 0.2), value: isGenerating)
             .overlay(alignment: .bottomTrailing) {
                 if !app.isCustomizable {
                     Image(systemName: "lock.fill")
@@ -31,7 +39,8 @@ struct DockAppCell: View {
                 }
             }
             Text(app.name)
-                .font(.caption)
+                .font(Theme.mono(10))
+                .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }

@@ -24,13 +24,24 @@ nonisolated struct HotKeySpec: Codable, Equatable, Hashable {
         carbonModifiers: UInt32(cmdKey | optionKey | controlKey)
     )
 
+    static let defaultOpenProject = HotKeySpec(
+        keyCode: UInt32(kVK_ANSI_O),
+        carbonModifiers: UInt32(cmdKey | optionKey | controlKey)
+    )
+
     var displayString: String {
-        var result = ""
-        if carbonModifiers & UInt32(controlKey) != 0 { result += "⌃" }
-        if carbonModifiers & UInt32(optionKey) != 0 { result += "⌥" }
-        if carbonModifiers & UInt32(shiftKey) != 0 { result += "⇧" }
-        if carbonModifiers & UInt32(cmdKey) != 0 { result += "⌘" }
-        return result + KeyCodeTranslator.label(for: keyCode)
+        keycapLabels.joined()
+    }
+
+    /// One label per physical key, for rendering the shortcut as keycaps.
+    var keycapLabels: [String] {
+        var labels: [String] = []
+        if carbonModifiers & UInt32(controlKey) != 0 { labels.append("⌃") }
+        if carbonModifiers & UInt32(optionKey) != 0 { labels.append("⌥") }
+        if carbonModifiers & UInt32(shiftKey) != 0 { labels.append("⇧") }
+        if carbonModifiers & UInt32(cmdKey) != 0 { labels.append("⌘") }
+        labels.append(KeyCodeTranslator.label(for: keyCode))
+        return labels
     }
 
     private static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {

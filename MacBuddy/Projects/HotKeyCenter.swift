@@ -1,32 +1,38 @@
 import Carbon
 import Observation
 
-/// Registers a single system-wide hotkey via Carbon's `RegisterEventHotKey`,
+/// The global actions a hotkey can trigger. Raw values double as the Carbon
+/// `EventHotKeyID.id`, so each case must stay unique and stable.
+nonisolated enum HotKeyAction: UInt32, CaseIterable {
+    case newProject = 1
+    case openProject = 2
+}
+
+/// Registers system-wide hotkeys via Carbon's `RegisterEventHotKey`,
 /// which needs no accessibility permission.
 @Observable
 final class HotKeyCenter {
     static let shared = HotKeyCenter()
 
-    var onHotKey: (() -> Void)?
-    private(set) var registrationError: String?
+    var onHotKey: ((HotKeyAction) -> Void)?
+    private(set) var registrationErrors: [HotKeyAction: String] = [:]
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [HotKeyAction: EventHotKeyRef] = [:]
     private var eventHandlerRef: EventHandlerRef?
     private static let signature: OSType = 0x4D42_4459 // 'MBDY'
 
     private init() {}
 
-    func register(_ spec: HotKeySpec?) {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+    func register(_ spec: HotKeySpec?, for action: HotKeyAction) {
+        if let ref = hotKeyRefs.removeValue(forKey: action) {
+            UnregisterEventHotKey(ref)
         }
-        registrationError = nil
+        registrationErrors[action] = nil
         guard let spec else { return }
 
         installEventHandlerIfNeeded()
         var ref: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
         let status = RegisterEventHotKey(
             spec.keyCode,
             spec.carbonModifiers,
@@ -35,15 +41,19 @@ final class HotKeyCenter {
             0,
             &ref
         )
-        if status == noErr {
-            hotKeyRef = ref
+        if status == noErr, let ref {
+            hotKeyRefs[action] = ref
         } else {
-            registrationError = "Couldn't register \(spec.displayString) (error \(status)). Another app may already be using it."
+            registrationErrors[action] = "Couldn't register \(spec.displayString) (error \(status)). Another app may already be using it."
         }
     }
 
-    func fire() {
-        onHotKey?()
+    func registrationError(for action: HotKeyAction) -> String? {
+        registrationErrors[action]
+    }
+
+    func fire(_ action: HotKeyAction) {
+        onHotKey?(action)
     }
 
     private func installEventHandlerIfNeeded() {
@@ -63,8 +73,19 @@ private nonisolated func handleHotKeyEvent(
     _ event: EventRef?,
     _ userData: UnsafeMutableRawPointer?
 ) -> OSStatus {
+    var hotKeyID = EventHotKeyID()
+    GetEventParameter(
+        event,
+        EventParamName(kEventParamDirectObject),
+        EventParamType(typeEventHotKeyID),
+        nil,
+        MemoryLayout<EventHotKeyID>.size,
+        nil,
+        &hotKeyID
+    )
+    guard let action = HotKeyAction(rawValue: hotKeyID.id) else { return noErr }
     MainActor.assumeIsolated {
-        HotKeyCenter.shared.fire()
+        HotKeyCenter.shared.fire(action)
     }
     return noErr
 }

@@ -5,22 +5,11 @@ struct ShortcutRecorderView: View {
     @State private var isRecording = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Button(action: toggleRecording) {
-                HStack(spacing: 6) {
-                    if isRecording {
-                        Image(systemName: "record.circle")
-                            .foregroundStyle(.red)
-                            .symbolEffect(.pulse, options: .repeating, isActive: isRecording)
-                            .transition(.scale.combined(with: .opacity))
-                            .accessibilityHidden(true)
-                    }
-                    Text(buttonTitle)
-                        .contentTransition(.opacity)
-                }
-                .frame(minWidth: 140)
-                .animation(.easeInOut(duration: 0.2), value: isRecording)
+                recorderLabel
             }
+            .buttonStyle(.plain)
             .background {
                 ShortcutCaptureView(isRecording: $isRecording, onEvent: handleRecordedEvent)
                     .frame(width: 1, height: 1)
@@ -28,20 +17,47 @@ struct ShortcutRecorderView: View {
             }
 
             if hotKey != nil, !isRecording {
-                Button("Clear shortcut", systemImage: "xmark.circle.fill", action: clear)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
+                Button(action: clear) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(IconButtonStyle())
+                .help("Clear shortcut")
+                .accessibilityLabel("Clear shortcut")
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: isRecording)
         .onDisappear(perform: stopRecording)
     }
 
-    private var buttonTitle: String {
+    @ViewBuilder
+    private var recorderLabel: some View {
         if isRecording {
-            "Type shortcut…"
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(Theme.alarmRed)
+                    .frame(width: 6, height: 6)
+                    .opacity(0.9)
+                Text("TYPE KEYS…")
+                    .font(Theme.mono(11, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Theme.alarmRed.opacity(0.1), in: .rect(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.alarmRed.opacity(0.5)))
+        } else if let hotKey {
+            KeycapRow(hotKey)
+                .help("Click to re-record")
         } else {
-            hotKey?.displayString ?? "Record Shortcut"
+            Text("RECORD")
+                .font(Theme.mono(11, weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.strokeBright))
         }
     }
 

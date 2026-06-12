@@ -10,9 +10,9 @@ struct DockPaletteView: View {
                 DockPermissionBanner(onOpenSettings: model.openPermissionSettings)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            Divider()
+            Rectangle().fill(Theme.stroke).frame(height: 1)
             DockAppGrid(model: model)
-            Divider()
+            Rectangle().fill(Theme.stroke).frame(height: 1)
             DockPaletteFooter(model: model)
         }
         .task { model.loadIfNeeded() }

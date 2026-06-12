@@ -18,34 +18,50 @@ struct NewProjectPromptView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                Image(systemName: "folder.badge.plus")
-                    .font(.title)
-                    .foregroundStyle(.tint)
-                TextField("Project name", text: $name)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Text("❯")
+                    .font(Theme.mono(20, weight: .bold))
+                    .foregroundStyle(Theme.amber)
+                TextField("project name", text: $name)
                     .textFieldStyle(.plain)
-                    .font(.title2)
+                    .font(Theme.mono(18))
+                    .foregroundStyle(Theme.textPrimary)
                     .focused($isNameFocused)
                     .onSubmit(submit)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
+            Rectangle()
+                .fill(Theme.stroke)
+                .frame(height: 1)
+
             HStack(spacing: 8) {
                 Text(destinationDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
                 if let validationMessage {
                     Text(validationMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                        .font(Theme.mono(10, weight: .semibold))
+                        .foregroundStyle(Theme.alarmRed)
+                } else {
+                    HStack(spacing: 5) {
+                        Keycap("↩")
+                        Text("create")
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
         }
-        .padding(24)
         .frame(width: 480)
-        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .panelGlass()
         .scaleEffect(hasAppeared || reduceMotion ? 1 : 0.94)
         .opacity(hasAppeared ? 1 : 0)
         .onExitCommand(perform: onCancel)
@@ -68,9 +84,9 @@ struct NewProjectPromptView: View {
         if trimmedName.isEmpty {
             nil
         } else if trimmedName.contains("/") || trimmedName.contains(":") {
-            "Name can't contain / or :"
+            "no / or :"
         } else if FileManager.default.fileExists(atPath: folder.appending(path: trimmedName).path(percentEncoded: false)) {
-            "Already exists"
+            "already exists"
         } else {
             nil
         }
@@ -78,7 +94,7 @@ struct NewProjectPromptView: View {
 
     private var destinationDescription: String {
         let target = trimmedName.isEmpty ? "…" : trimmedName
-        return "Creates \(folder.appending(path: target).path(percentEncoded: false)) and opens your terminal"
+        return "mkdir \(folder.path(percentEncoded: false))/\(target)"
     }
 
     private func submit() {
@@ -95,4 +111,6 @@ struct NewProjectPromptView: View {
         onCancel: {}
     )
     .padding(40)
+    .background(ThemeBackground())
+    .preferredColorScheme(.dark)
 }
