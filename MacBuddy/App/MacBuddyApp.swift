@@ -5,14 +5,17 @@ struct MacBuddyApp: App {
     @State private var settings: AppSettings
     @State private var coordinator: NewProjectCoordinator
     @State private var openCoordinator: OpenProjectCoordinator
+    @State private var menuBarIconModel: MenuBarIconManagerModel
 
     init() {
         let settings = AppSettings()
         let coordinator = NewProjectCoordinator(settings: settings)
         let openCoordinator = OpenProjectCoordinator(settings: settings)
+        let menuBarIconModel = MenuBarIconManagerModel()
         _settings = State(initialValue: settings)
         _coordinator = State(initialValue: coordinator)
         _openCoordinator = State(initialValue: openCoordinator)
+        _menuBarIconModel = State(initialValue: menuBarIconModel)
         HotKeyCenter.shared.onHotKey = { action in
             switch action {
             case .newProject: coordinator.promptForNewProject()
@@ -29,6 +32,7 @@ struct MacBuddyApp: App {
                 .environment(settings)
                 .environment(coordinator)
                 .environment(openCoordinator)
+                .environment(menuBarIconModel)
         }
         .defaultSize(width: 820, height: 600)
         .windowStyle(.hiddenTitleBar)
@@ -38,6 +42,7 @@ struct MacBuddyApp: App {
                 .environment(settings)
                 .environment(coordinator)
                 .environment(openCoordinator)
+                .environment(menuBarIconModel)
         }
     }
 }

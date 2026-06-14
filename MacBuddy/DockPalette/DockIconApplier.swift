@@ -6,6 +6,14 @@ enum DockIconApplier {
     static func apply(_ bitmap: IconBitmap, toAppAt path: String) -> Bool {
         let image = NSImage(cgImage: bitmap.image, size: NSSize(width: 512, height: 512))
         guard NSWorkspace.shared.setIcon(image, forFile: path, options: []) else { return false }
+        // setIcon can set the custom-icon Finder flag yet fail to write the
+        // Icon\r resource — which renders as a *blank* icon. Verify, and roll
+        // back to the bundle's own icon rather than leave that state.
+        let iconFile = URL(filePath: path).appending(path: "Icon\r").path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: iconFile) else {
+            _ = NSWorkspace.shared.setIcon(nil, forFile: path, options: [])
+            return false
+        }
         touch(path)
         return true
     }

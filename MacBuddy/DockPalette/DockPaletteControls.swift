@@ -33,6 +33,8 @@ struct DockPaletteControls: View {
 
                 Spacer()
 
+                IconCollectionsButton(model: model)
+
                 Button(action: model.reload) {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -84,7 +86,10 @@ private struct AIPromptRow: View {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.mini)
-                        Text("Generating…")
+                        Text("Generating \(model.generatingPaths.count)…")
+                            .monospacedDigit()
+                            .contentTransition(.numericText(countsDown: true))
+                            .animation(.easeOut(duration: 0.25), value: model.generatingPaths.count)
                     }
                 } else {
                     Label("Generate", systemImage: "sparkles")
@@ -94,6 +99,16 @@ private struct AIPromptRow: View {
             .fixedSize()
             .disabled(model.isGeneratingAI || model.apps.isEmpty)
             .help("Restyles every customizable Dock icon via fal.ai (one request per icon)")
+
+            if !model.aiResults.isEmpty {
+                Button(action: model.discardAllAIResults) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(Theme.alarmRed)
+                }
+                .buttonStyle(IconButtonStyle())
+                .disabled(model.isGeneratingAI)
+                .help("Discard all \(model.aiResults.count) generated icons")
+            }
 
             Button {
                 isShowingKeyPopover = true

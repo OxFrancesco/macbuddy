@@ -12,11 +12,13 @@ Requires Xcode 26+ and [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew 
 ```bash
 xcodegen generate
 open MacBuddy.xcodeproj        # build & run from Xcode
-# or from the CLI:
-xcodebuild -project MacBuddy.xcodeproj -scheme MacBuddy -configuration Release -derivedDataPath build build
+# or build + install/relaunch /Applications/MacBuddy.app in one go:
+scripts/install.sh
 ```
 
-Copy `build/Build/Products/Release/MacBuddy.app` to `/Applications` and add it to **System Settings → General → Login Items** if you want the shortcut available all the time (the app must be running for the hotkey to work — it also lives in the menu bar).
+Add the app to **System Settings → General → Login Items** if you want the shortcut available all the time (the app must be running for the hotkey to work — it also lives in the menu bar).
+
+**Signing matters here.** The Dock Palette needs the **App Management** permission, and macOS ties that grant to the app's code-signing identity. The project therefore signs with a real Apple Development certificate (`DEVELOPMENT_TEAM` in `project.yml` — change it to your own team). With ad-hoc signing (`CODE_SIGN_IDENTITY: "-"`) the grant is keyed to one exact binary, so every rebuild — or a second copy of the app lying around — silently revokes it ("permission gone after Quit & Reopen"). Keep `/Applications/MacBuddy.app` as the only copy you launch; `scripts/install.sh` takes care of that.
 
 ## Projects
 
@@ -33,6 +35,7 @@ First launch with Terminal/iTerm2 triggers the macOS **Automation** permission p
 
 - Reads the apps pinned in your Dock from `com.apple.dock` preferences and shows live styled previews.
 - Styles: **Noir** (grayscale), **B&W** (pure two-tone `#FEFEFE`/`#030303`, no gradient), **Tint** (any color), **Sepia**, **Pastel** — plus an intensity slider.
+- **Icon collections**: save a generated AI icon set under a name (e.g. "claymation"), then load it back later to re-apply — switch whole dock themes without regenerating. The stacks button in the controls row opens the collections list.
 - **Apply to Dock** writes a custom icon onto each app bundle (the standard Finder custom-icon mechanism, like Pictogram/LiteIcon), then restarts the Dock.
 - **Restore Originals** removes the custom icons and restarts the Dock.
 
@@ -52,4 +55,4 @@ MacBuddy/
   DockPalette/    dock reading, Core Image styling, icon apply/restore, grid UI
 ```
 
-No third-party dependencies. Not sandboxed (it needs to script terminals and write icons onto other app bundles), signed to run locally.
+No third-party dependencies. Not sandboxed (it needs to script terminals and write icons onto other app bundles), signed with an Apple Development certificate so TCC permissions survive rebuilds.

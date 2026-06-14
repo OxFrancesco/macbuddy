@@ -18,7 +18,13 @@ struct DockAppGrid: View {
                         DockAppCell(
                             app: app,
                             preview: model.previews[app.id],
-                            isGenerating: model.generatingPaths.contains(app.path)
+                            isGenerating: model.generatingPaths.contains(app.path),
+                            onDiscard: model.style == .ai && model.aiResults[app.path] != nil
+                                ? { model.discardAIResult(forAppPath: app.path) }
+                                : nil,
+                            onRegenerate: model.style == .ai && app.isCustomizable
+                                ? { model.regenerateAIIcon(forAppPath: app.path) }
+                                : nil
                         )
                     }
                 }

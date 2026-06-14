@@ -16,6 +16,8 @@ struct ContentView: View {
                     ProjectsView()
                 case .dockPalette:
                     DockPaletteView()
+                case .menuBar:
+                    MenuBarIconsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,6 +74,7 @@ private struct TabSwitch: View {
     private let tabs: [(tab: AppTab, title: String)] = [
         (.projects, "PROJECTS"),
         (.dockPalette, "DOCK"),
+        (.menuBar, "MENU BAR"),
     ]
 
     var body: some View {
@@ -132,4 +135,5 @@ private struct SwitchLabel: View {
         .environment(settings)
         .environment(NewProjectCoordinator(settings: settings))
         .environment(OpenProjectCoordinator(settings: settings))
+        .environment(MenuBarIconManagerModel())
 }

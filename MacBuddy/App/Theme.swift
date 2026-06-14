@@ -168,19 +168,23 @@ struct Keycap: View {
 
 struct BlinkingCursor: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isOn = true
 
     var body: some View {
+        if reduceMotion {
+            cursor(opacity: 1)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.7)) { context in
+                let tick = Int(context.date.timeIntervalSinceReferenceDate / 0.7)
+                cursor(opacity: tick.isMultiple(of: 2) ? 1 : 0.1)
+            }
+        }
+    }
+
+    private func cursor(opacity: Double) -> some View {
         Rectangle()
             .fill(Theme.amber)
             .frame(width: 7, height: 14)
-            .opacity(isOn ? 1 : 0.1)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isOn = false
-                }
-            }
+            .opacity(opacity)
     }
 }
 

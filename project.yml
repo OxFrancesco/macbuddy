@@ -11,7 +11,8 @@ targets:
     sources:
       - path: MacBuddy
     scheme:
-      testTargets: []
+      testTargets:
+        - MacBuddyTests
     settings:
       base:
         PRODUCT_NAME: MacBuddy
@@ -22,10 +23,33 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_NSAppleEventsUsageDescription: "MacBuddy opens your terminal app and runs your chosen coding agent inside new project folders."
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Sign with a real (stable) identity, NOT ad-hoc ("-"): the App
+        # Management TCC grant is keyed to the code-signing identity. Ad-hoc
+        # binaries get a per-build cdhash requirement, so every rebuild (or a
+        # second copy of the app) silently invalidates the permission.
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: G2442WAF29
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
+  MacBuddyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: MacBuddyTests
+      - path: MacBuddy/MenuBarIcons/MenuBarIcon.swift
+      - path: MacBuddy/MenuBarIcons/MenuBarIconStore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.francescooddo.macbuddy.tests
+        SWIFT_VERSION: "6.0"
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: G2442WAF29

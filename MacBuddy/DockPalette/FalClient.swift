@@ -26,18 +26,34 @@ nonisolated enum FalClient {
         request.httpMethod = "POST"
         request.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 180
+        // gpt-image at high quality regularly takes 3-5 minutes per icon.
+        request.timeoutInterval = 420
 
-        let body: [String: Any] = [
+        let imageURI = "data:image/png;base64,\(pngData.base64EncodedString())"
+        var body: [String: Any] = [
             "prompt": prompt,
-            "image_url": "data:image/png;base64,\(pngData.base64EncodedString())",
-            "strength": strength,
             "num_images": 1,
-            "image_size": "square_hd",
             "output_format": "png",
             "sync_mode": true,
-            "enable_safety_checker": false,
         ]
+        if modelId.contains("gpt-image") || modelId.contains("nano-banana") {
+            // Instruction-driven editors: image list, no strength knob.
+            body["image_urls"] = [imageURI]
+            if modelId.contains("gpt-image") {
+                body["image_size"] = "auto"
+                body["quality"] = "high"
+            } else {
+                body["resolution"] = "1K"
+            }
+        } else {
+            body["image_url"] = imageURI
+            body["strength"] = strength
+            body["image_size"] = "square_hd"
+            body["enable_safety_checker"] = false
+            if modelId.contains("ideogram") {
+                body["rendering_speed"] = "QUALITY"
+            }
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -58,6 +74,44 @@ nonisolated enum FalClient {
         guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw FalError(message: "Couldn't decode the generated image.")
+        }
+        return image
+    }
+
+    /// Cuts the background off an image via pixelcut, returning real RGBA —
+    /// the image-edit models never return transparency on fal.
+    @concurrent
+    static func removeBackground(pngData: Data, apiKey: String) async throws -> CGImage {
+        guard let url = URL(string: "https://fal.run/pixelcut/background-removal") else {
+            throw FalError(message: "Invalid background-removal endpoint.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 180
+
+        let body: [String: Any] = [
+            "image_url": "data:image/png;base64,\(pngData.base64EncodedString())",
+            "output_format": "rgba",
+            "sync_mode": true,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw FalError(message: errorMessage(status: status, body: data))
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let imageInfo = json["image"] as? [String: Any],
+              let imageURLString = imageInfo["url"] as? String else {
+            throw FalError(message: "Unexpected background-removal response.")
+        }
+        let imageData = try await imageData(from: imageURLString)
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw FalError(message: "Couldn't decode the cut-out image.")
         }
         return image
     }
