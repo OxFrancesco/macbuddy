@@ -81,8 +81,8 @@ struct MenuBarIconLogicTests {
         #expect(classified.isEmpty)
     }
 
-    @Test func safetyRejectsMissingPermission() {
-        let error = MenuBarMoveSafety.validate(
+    @Test func safetyRejectsMissingPermission() async {
+        let error = await validationError(
             accessibilityTrusted: false,
             separatorFrame: CGRect(x: 500, y: 0, width: 1, height: 24),
             macBuddyAnchorVisible: true,
@@ -93,8 +93,8 @@ struct MenuBarIconLogicTests {
         #expect(error == .accessibilityPermissionMissing)
     }
 
-    @Test func safetyRejectsMissingSeparator() {
-        let error = MenuBarMoveSafety.validate(
+    @Test func safetyRejectsMissingSeparator() async {
+        let error = await validationError(
             accessibilityTrusted: true,
             separatorFrame: nil,
             macBuddyAnchorVisible: true,
@@ -105,8 +105,8 @@ struct MenuBarIconLogicTests {
         #expect(error == .missingSeparator)
     }
 
-    @Test func safetyRejectsMissingMacBuddyAnchor() {
-        let error = MenuBarMoveSafety.validate(
+    @Test func safetyRejectsMissingMacBuddyAnchor() async {
+        let error = await validationError(
             accessibilityTrusted: true,
             separatorFrame: CGRect(x: 500, y: 0, width: 1, height: 24),
             macBuddyAnchorVisible: false,
@@ -117,8 +117,8 @@ struct MenuBarIconLogicTests {
         #expect(error == .missingMacBuddyAnchor)
     }
 
-    @Test func safetyRejectsSystemItems() {
-        let error = MenuBarMoveSafety.validate(
+    @Test func safetyRejectsSystemItems() async {
+        let error = await validationError(
             accessibilityTrusted: true,
             separatorFrame: CGRect(x: 500, y: 0, width: 1, height: 24),
             macBuddyAnchorVisible: true,
@@ -129,10 +129,10 @@ struct MenuBarIconLogicTests {
         #expect(error == .lockedSystemItem)
     }
 
-    @Test func safetyRejectsAutomaticStartupAndWakeMoves() {
+    @Test func safetyRejectsAutomaticStartupAndWakeMoves() async {
         let separator = CGRect(x: 500, y: 0, width: 1, height: 24)
 
-        #expect(MenuBarMoveSafety.validate(
+        #expect(await validationError(
             accessibilityTrusted: true,
             separatorFrame: separator,
             macBuddyAnchorVisible: true,
@@ -140,7 +140,7 @@ struct MenuBarIconLogicTests {
             origin: .startup
         ) == .automaticMoveRefused)
 
-        #expect(MenuBarMoveSafety.validate(
+        #expect(await validationError(
             accessibilityTrusted: true,
             separatorFrame: separator,
             macBuddyAnchorVisible: true,
@@ -148,13 +148,34 @@ struct MenuBarIconLogicTests {
             origin: .wake
         ) == .automaticMoveRefused)
 
-        #expect(MenuBarMoveSafety.validate(
+        #expect(await validationError(
             accessibilityTrusted: true,
             separatorFrame: separator,
             macBuddyAnchorVisible: true,
             icon: makeIcon(),
             origin: .recovery
         ) == .automaticMoveRefused)
+    }
+
+    @Test func safetySkipsAnchorCheckAfterEarlierFailure() async {
+        var anchorChecks = 0
+        let result = await MenuBarMoveSafety.validate(
+            accessibilityTrusted: false,
+            separatorFrame: CGRect(x: 500, y: 0, width: 1, height: 24),
+            macBuddyAnchorVisible: {
+                anchorChecks += 1
+                return false
+            },
+            icon: makeIcon(),
+            origin: .userAction
+        )
+
+        guard case .failure(let error) = result else {
+            Issue.record("Expected validation to fail")
+            return
+        }
+        #expect(error == .accessibilityPermissionMissing)
+        #expect(anchorChecks == 0)
     }
 
     @Test func stableIDsOnlyAddOrdinalsForDuplicates() {
@@ -255,5 +276,25 @@ struct MenuBarIconLogicTests {
             isSystemItem: isSystemItem,
             zone: .keep
         )
+    }
+
+    private func validationError(
+        accessibilityTrusted: Bool,
+        separatorFrame: CGRect?,
+        macBuddyAnchorVisible: Bool,
+        icon: MenuBarIconSnapshot,
+        origin: MenuBarMoveOrigin
+    ) async -> MenuBarIconMoveError? {
+        let result = await MenuBarMoveSafety.validate(
+            accessibilityTrusted: accessibilityTrusted,
+            separatorFrame: separatorFrame,
+            macBuddyAnchorVisible: { macBuddyAnchorVisible },
+            icon: icon,
+            origin: origin
+        )
+        guard case .failure(let error) = result else {
+            return nil
+        }
+        return error
     }
 }

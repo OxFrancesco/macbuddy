@@ -22,10 +22,11 @@ nonisolated enum AIIconStylist {
         apiKey: String,
         modelId: String
     ) async throws -> IconBitmap {
+        let profile = FalModelProfile(modelId: modelId)
         let cropped = contentCropped(source.image)
         // Multimodal editors read alpha PNGs directly; opaque-only models
         // need the artwork flattened onto a contrasting backdrop first.
-        let prepared = acceptsAlphaInput(modelId)
+        let prepared = profile.acceptsAlphaInput
             ? cropped
             : flattenedAdaptive(cropped, size: canvasSize)
         guard let prepared, let pngData = pngData(from: prepared) else {
@@ -33,20 +34,23 @@ nonisolated enum AIIconStylist {
         }
         var generated = try await FalClient.editImage(
             pngData: pngData,
-            prompt: prompt(for: stylePrompt, appName: appName, modelId: modelId),
+            prompt: prompt(for: stylePrompt, appName: appName, profile: profile),
             strength: strength,
             apiKey: apiKey,
-            modelId: modelId
+            modelId: profile.modelId
         )
         try Task.checkCancellation()
         // fal's wrappers return opaque PNGs (even a painted checkerboard
         // "transparency"), so cut the backdrop off for real alpha. If the
         // cut fails, composedIcon's corner extraction still handles it.
-        if !hasMeaningfulTransparency(generated),
+        let outputHasTransparency = hasMeaningfulTransparency(generated)
+        if profile.shouldAttemptBackgroundRemoval(outputHasMeaningfulTransparency: outputHasTransparency),
            let generatedPNG = self.pngData(from: generated),
            let cut = try? await FalClient.removeBackground(pngData: generatedPNG, apiKey: apiKey),
-           hasMeaningfulTransparency(cut),
-           opaqueCoverage(cut) >= 0.1 {
+           profile.acceptsBackgroundRemovalResult(
+               hasMeaningfulTransparency: hasMeaningfulTransparency(cut),
+               opaqueCoverage: opaqueCoverage(cut)
+           ) {
             // The coverage gate rejects over-aggressive cuts that hollow the
             // icon out — extraction on the uncut image handles those instead.
             generated = cut
@@ -58,16 +62,12 @@ nonisolated enum AIIconStylist {
         return IconBitmap(image: composed)
     }
 
-    private static func acceptsAlphaInput(_ modelId: String) -> Bool {
-        modelId.contains("gpt-image") || modelId.contains("nano-banana")
-    }
-
-    private static func prompt(for style: String, appName: String, modelId: String) -> String {
+    private static func prompt(for style: String, appName: String, profile: FalModelProfile) -> String {
         var prompt = "Restyle this macOS app icon of the app “\(appName)”: \(style). "
             + "Reimagine the icon artwork in that style while keeping its shape, "
             + "silhouette and composition clearly recognizable. A single centered "
             + "app icon, crisp and detailed, no text, no watermark."
-        if acceptsAlphaInput(modelId) {
+        if profile.asksForTransparentOutput {
             prompt += " Keep the background fully transparent and keep the icon's "
                 + "rounded-square proportions."
         }

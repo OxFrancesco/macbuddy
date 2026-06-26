@@ -22,34 +22,23 @@ final class MenuBarIconMover {
         origin: MenuBarMoveOrigin = .userAction
     ) async -> Result<Void, MenuBarIconMoveError> {
         anchorController.installIfNeeded()
-        let separatorFrame = anchorController.separatorFrame
 
-        guard origin == .userAction else {
-            return .failure(.automaticMoveRefused)
-        }
-        guard accessibilityService.isTrusted else {
-            return .failure(.accessibilityPermissionMissing)
-        }
-        guard !icon.isSystemItem else {
-            return .failure(.lockedSystemItem)
-        }
-        guard !icon.frame.isEmpty else {
-            return .failure(.missingIconFrame)
-        }
-        guard let separatorFrame else {
-            return .failure(.missingSeparator)
-        }
-
-        anchorController.setHiddenItemsRevealed(true)
-        try? await Task.sleep(for: .milliseconds(120))
-
-        if let error = MenuBarMoveSafety.validate(
-            accessibilityTrusted: true,
-            separatorFrame: separatorFrame,
-            macBuddyAnchorVisible: await hasVisibleMacBuddyAnchor(),
+        let validation = await MenuBarMoveSafety.validate(
+            accessibilityTrusted: accessibilityService.isTrusted,
+            separatorFrame: anchorController.separatorFrame,
+            macBuddyAnchorVisible: {
+                anchorController.setHiddenItemsRevealed(true)
+                try? await Task.sleep(for: .milliseconds(120))
+                return await hasVisibleMacBuddyAnchor()
+            },
             icon: icon,
             origin: origin
-        ) {
+        )
+        let separatorFrame: CGRect
+        switch validation {
+        case .success(let validatedMove):
+            separatorFrame = validatedMove.separatorFrame
+        case .failure(let error):
             return .failure(error)
         }
 

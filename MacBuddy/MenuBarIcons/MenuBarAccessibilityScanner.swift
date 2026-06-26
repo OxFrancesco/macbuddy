@@ -4,45 +4,74 @@ import ApplicationServices
 nonisolated enum MenuBarAccessibilityScanner {
     private static let axMessagingTimeout: Float = 0.08
 
+    struct Entry {
+        let snapshot: MenuBarIconSnapshot
+        let element: AXUIElement?
+    }
+
     static func scanMenuBarIcons(
         appBundleIdentifier: String?,
         includeMacBuddy: Bool = false
     ) -> [MenuBarIconSnapshot] {
+        scanMenuBarIconEntries(
+            appBundleIdentifier: appBundleIdentifier,
+            includeMacBuddy: includeMacBuddy,
+            retainElements: false
+        )
+        .map(\.snapshot)
+    }
+
+    static func scanMenuBarIconEntries(
+        appBundleIdentifier: String?,
+        includeMacBuddy: Bool = false,
+        retainElements: Bool
+    ) -> [Entry] {
         guard AXIsProcessTrusted() else { return [] }
 
         let drafts = collectDrafts(
             appBundleIdentifier: appBundleIdentifier,
-            includeMacBuddy: includeMacBuddy
+            includeMacBuddy: includeMacBuddy,
+            retainElements: retainElements
         )
         let grouped = Dictionary(grouping: drafts, by: \.identityBase)
-        var icons: [MenuBarIconSnapshot] = []
+        var entries: [Entry] = []
 
-        for (_, entries) in grouped {
-            let sortedEntries = entries.sorted { $0.frame.minX < $1.frame.minX }
-            for (index, entry) in sortedEntries.enumerated() {
-                var snapshot = entry
+        for (_, drafts) in grouped {
+            let sortedDrafts = drafts.sorted { $0.snapshot.frame.minX < $1.snapshot.frame.minX }
+            for (index, draft) in sortedDrafts.enumerated() {
+                var snapshot = draft.snapshot
                 snapshot.id = MenuBarIconIdentity.id(
                     baseID: snapshot.identityBase,
                     ordinal: index + 1,
-                    duplicateCount: sortedEntries.count
+                    duplicateCount: sortedDrafts.count
                 )
-                icons.append(snapshot)
+                entries.append(Entry(snapshot: snapshot, element: draft.element))
             }
         }
 
-        return icons.sorted { lhs, rhs in
-            if lhs.frame.minX == rhs.frame.minX {
-                return lhs.displayName < rhs.displayName
+        return entries.sorted { lhs, rhs in
+            if lhs.snapshot.frame.minX == rhs.snapshot.frame.minX {
+                return lhs.snapshot.displayName < rhs.snapshot.displayName
             }
-            return lhs.frame.minX < rhs.frame.minX
+            return lhs.snapshot.frame.minX < rhs.snapshot.frame.minX
+        }
+    }
+
+    private struct Draft {
+        let snapshot: MenuBarIconSnapshot
+        let element: AXUIElement?
+
+        var identityBase: String {
+            snapshot.identityBase
         }
     }
 
     private static func collectDrafts(
         appBundleIdentifier: String?,
-        includeMacBuddy: Bool
-    ) -> [MenuBarIconSnapshot] {
-        var drafts: [MenuBarIconSnapshot] = []
+        includeMacBuddy: Bool,
+        retainElements: Bool
+    ) -> [Draft] {
+        var drafts: [Draft] = []
         for app in NSWorkspace.shared.runningApplications {
             guard !app.isTerminated, app.processIdentifier > 0 else { continue }
             if !includeMacBuddy, app.bundleIdentifier == appBundleIdentifier {
@@ -54,7 +83,7 @@ nonisolated enum MenuBarAccessibilityScanner {
             guard let extrasValue = copyAttribute(kAXExtrasMenuBarAttribute, from: appElement) else {
                 continue
             }
-            let extrasMenuBar = extrasValue as! AXUIElement
+            guard let extrasMenuBar = axElement(from: extrasValue) else { continue }
             _ = AXUIElementSetMessagingTimeout(extrasMenuBar, axMessagingTimeout)
             guard let children = copyAttribute(kAXChildrenAttribute, from: extrasMenuBar) as? [AXUIElement] else {
                 continue
@@ -79,19 +108,23 @@ nonisolated enum MenuBarAccessibilityScanner {
                     description: description,
                     help: help
                 )
+                let snapshot = MenuBarIconSnapshot(
+                    id: identityBase,
+                    identityBase: identityBase,
+                    ownerBundleIdentifier: ownerBundleIdentifier,
+                    ownerName: ownerName,
+                    processIdentifier: app.processIdentifier,
+                    title: title,
+                    accessibilityDescription: description,
+                    help: help,
+                    frame: frame,
+                    isSystemItem: ownerBundleIdentifier?.hasPrefix("com.apple.") == true,
+                    zone: .keep
+                )
                 drafts.append(
-                    MenuBarIconSnapshot(
-                        id: identityBase,
-                        identityBase: identityBase,
-                        ownerBundleIdentifier: ownerBundleIdentifier,
-                        ownerName: ownerName,
-                        processIdentifier: app.processIdentifier,
-                        title: title,
-                        accessibilityDescription: description,
-                        help: help,
-                        frame: frame,
-                        isSystemItem: ownerBundleIdentifier?.hasPrefix("com.apple.") == true,
-                        zone: .keep
+                    Draft(
+                        snapshot: snapshot,
+                        element: retainElements ? child : nil
                     )
                 )
             }
@@ -110,17 +143,29 @@ nonisolated enum MenuBarAccessibilityScanner {
         stringAttribute(kAXRoleAttribute, from: element)
     }
 
+    private static func axElement(from value: CFTypeRef) -> AXUIElement? {
+        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    private static func axValue(from value: CFTypeRef, type: AXValueType) -> AXValue? {
+        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        let axValue = (value as! AXValue)
+        guard AXValueGetType(axValue) == type else { return nil }
+        return axValue
+    }
+
     private static func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
         copyAttribute(attribute, from: element) as? String
     }
 
     private static func frame(of element: AXUIElement) -> CGRect? {
         guard let positionRef = copyAttribute(kAXPositionAttribute, from: element),
-              let sizeRef = copyAttribute(kAXSizeAttribute, from: element) else {
+              let sizeRef = copyAttribute(kAXSizeAttribute, from: element),
+              let positionValue = axValue(from: positionRef, type: .cgPoint),
+              let sizeValue = axValue(from: sizeRef, type: .cgSize) else {
             return nil
         }
-        let positionValue = positionRef as! AXValue
-        let sizeValue = sizeRef as! AXValue
 
         var point = CGPoint.zero
         var size = CGSize.zero

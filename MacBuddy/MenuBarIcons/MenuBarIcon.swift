@@ -187,32 +187,36 @@ nonisolated enum MenuBarAnchorLayout {
 }
 
 nonisolated enum MenuBarMoveSafety {
+    nonisolated struct Validation: Equatable, Sendable {
+        let separatorFrame: CGRect
+    }
+
     static func validate(
         accessibilityTrusted: Bool,
         separatorFrame: CGRect?,
-        macBuddyAnchorVisible: Bool,
+        macBuddyAnchorVisible: @MainActor () async -> Bool,
         icon: MenuBarIconSnapshot,
         origin: MenuBarMoveOrigin
-    ) -> MenuBarIconMoveError? {
+    ) async -> Result<Validation, MenuBarIconMoveError> {
         guard origin == .userAction else {
-            return .automaticMoveRefused
+            return .failure(.automaticMoveRefused)
         }
         guard accessibilityTrusted else {
-            return .accessibilityPermissionMissing
+            return .failure(.accessibilityPermissionMissing)
         }
         guard !icon.isSystemItem else {
-            return .lockedSystemItem
+            return .failure(.lockedSystemItem)
         }
         guard !icon.frame.isEmpty else {
-            return .missingIconFrame
+            return .failure(.missingIconFrame)
         }
-        guard separatorFrame != nil else {
-            return .missingSeparator
+        guard let separatorFrame else {
+            return .failure(.missingSeparator)
         }
-        guard macBuddyAnchorVisible else {
-            return .missingMacBuddyAnchor
+        guard await macBuddyAnchorVisible() else {
+            return .failure(.missingMacBuddyAnchor)
         }
-        return nil
+        return .success(Validation(separatorFrame: separatorFrame))
     }
 }
 

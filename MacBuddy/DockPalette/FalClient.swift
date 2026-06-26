@@ -2,6 +2,152 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
+/// Centralizes the fal.ai model differences used by DockPalette generation.
+nonisolated struct FalModelProfile: Sendable {
+    let modelId: String
+    let acceptsAlphaInput: Bool
+    let asksForTransparentOutput: Bool
+
+    private let imageInput: ImageInput
+    private let sizeParameter: SizeParameter
+    private let supportsStrength: Bool
+    private let quality: String?
+    private let renderingSpeed: String?
+    private let disablesSafetyChecker: Bool
+    private let backgroundRemoval: BackgroundRemoval
+
+    init(modelId: String) {
+        self.modelId = modelId
+
+        switch Self.family(for: modelId) {
+        case .gptImage:
+            acceptsAlphaInput = true
+            asksForTransparentOutput = true
+            imageInput = .imageURLs
+            sizeParameter = .imageSize("auto")
+            supportsStrength = false
+            quality = "high"
+            renderingSpeed = nil
+            disablesSafetyChecker = false
+        case .nanoBanana:
+            acceptsAlphaInput = true
+            asksForTransparentOutput = true
+            imageInput = .imageURLs
+            sizeParameter = .resolution("1K")
+            supportsStrength = false
+            quality = nil
+            renderingSpeed = nil
+            disablesSafetyChecker = false
+        case .ideogram:
+            acceptsAlphaInput = false
+            asksForTransparentOutput = false
+            imageInput = .imageURL
+            sizeParameter = .imageSize("square_hd")
+            supportsStrength = true
+            quality = nil
+            renderingSpeed = "QUALITY"
+            disablesSafetyChecker = true
+        case .imageToImage:
+            acceptsAlphaInput = false
+            asksForTransparentOutput = false
+            imageInput = .imageURL
+            sizeParameter = .imageSize("square_hd")
+            supportsStrength = true
+            quality = nil
+            renderingSpeed = nil
+            disablesSafetyChecker = true
+        }
+
+        backgroundRemoval = .fallbackWhenOpaque(minOpaqueCoverage: 0.1)
+    }
+
+    func editRequestBody(prompt: String, imageURI: String, strength: Double) -> [String: Any] {
+        var body: [String: Any] = [
+            "prompt": prompt,
+            "num_images": 1,
+            "output_format": "png",
+            "sync_mode": true,
+        ]
+        switch imageInput {
+        case .imageURL:
+            body["image_url"] = imageURI
+        case .imageURLs:
+            body["image_urls"] = [imageURI]
+        }
+        if supportsStrength {
+            body["strength"] = strength
+        }
+        sizeParameter.apply(to: &body)
+        if let quality {
+            body["quality"] = quality
+        }
+        if let renderingSpeed {
+            body["rendering_speed"] = renderingSpeed
+        }
+        if disablesSafetyChecker {
+            body["enable_safety_checker"] = false
+        }
+        return body
+    }
+
+    func shouldAttemptBackgroundRemoval(outputHasMeaningfulTransparency: Bool) -> Bool {
+        switch backgroundRemoval {
+        case .fallbackWhenOpaque:
+            !outputHasMeaningfulTransparency
+        }
+    }
+
+    func acceptsBackgroundRemovalResult(hasMeaningfulTransparency: Bool, opaqueCoverage: Double) -> Bool {
+        switch backgroundRemoval {
+        case .fallbackWhenOpaque(let minOpaqueCoverage):
+            hasMeaningfulTransparency && opaqueCoverage >= minOpaqueCoverage
+        }
+    }
+
+    private enum Family: Sendable {
+        case gptImage
+        case nanoBanana
+        case ideogram
+        case imageToImage
+    }
+
+    private enum ImageInput: Sendable {
+        case imageURL
+        case imageURLs
+    }
+
+    private enum SizeParameter: Sendable {
+        case imageSize(String)
+        case resolution(String)
+
+        func apply(to body: inout [String: Any]) {
+            switch self {
+            case .imageSize(let value):
+                body["image_size"] = value
+            case .resolution(let value):
+                body["resolution"] = value
+            }
+        }
+    }
+
+    private enum BackgroundRemoval: Sendable {
+        case fallbackWhenOpaque(minOpaqueCoverage: Double)
+    }
+
+    private static func family(for modelId: String) -> Family {
+        if modelId.contains("gpt-image") {
+            return .gptImage
+        }
+        if modelId.contains("nano-banana") {
+            return .nanoBanana
+        }
+        if modelId.contains("ideogram") {
+            return .ideogram
+        }
+        return .imageToImage
+    }
+}
+
 /// Minimal client for fal.ai's synchronous inference endpoint
 /// (`https://fal.run/<model-id>`).
 nonisolated enum FalClient {
@@ -19,7 +165,8 @@ nonisolated enum FalClient {
         apiKey: String,
         modelId: String
     ) async throws -> CGImage {
-        guard let url = URL(string: "https://fal.run/\(modelId)") else {
+        let profile = FalModelProfile(modelId: modelId)
+        guard let url = URL(string: "https://fal.run/\(profile.modelId)") else {
             throw FalError(message: "Invalid model id “\(modelId)”.")
         }
         var request = URLRequest(url: url)
@@ -30,30 +177,7 @@ nonisolated enum FalClient {
         request.timeoutInterval = 420
 
         let imageURI = "data:image/png;base64,\(pngData.base64EncodedString())"
-        var body: [String: Any] = [
-            "prompt": prompt,
-            "num_images": 1,
-            "output_format": "png",
-            "sync_mode": true,
-        ]
-        if modelId.contains("gpt-image") || modelId.contains("nano-banana") {
-            // Instruction-driven editors: image list, no strength knob.
-            body["image_urls"] = [imageURI]
-            if modelId.contains("gpt-image") {
-                body["image_size"] = "auto"
-                body["quality"] = "high"
-            } else {
-                body["resolution"] = "1K"
-            }
-        } else {
-            body["image_url"] = imageURI
-            body["strength"] = strength
-            body["image_size"] = "square_hd"
-            body["enable_safety_checker"] = false
-            if modelId.contains("ideogram") {
-                body["rendering_speed"] = "QUALITY"
-            }
-        }
+        let body = profile.editRequestBody(prompt: prompt, imageURI: imageURI, strength: strength)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)

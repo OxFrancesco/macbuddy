@@ -21,7 +21,9 @@ final class DockPaletteModel {
     private(set) var aiResults: [String: IconBitmap] = [:]
     private(set) var generatingPaths: Set<String> = []
     private(set) var falKeyAvailable = false
-    private var aiTask: Task<Void, Never>?
+    private var aiGenerationTasks: [Int: Task<Void, Never>] = [:]
+    private var aiGenerationOwners: [String: Int] = [:]
+    private var nextAIGenerationID = 0
 
     // Saved icon collections (named snapshots of generated sets).
     private(set) var collections: [IconCollection] = []
@@ -74,6 +76,7 @@ final class DockPaletteModel {
     }
 
     func reload() {
+        invalidateAIGenerations()
         apps = DockReader.dockApps()
         previews = [:]
         appsVersion += 1
@@ -188,29 +191,31 @@ final class DockPaletteModel {
         let modelId = falModelId
         if paths == nil {
             // A full run replaces any previous one.
-            aiTask?.cancel()
-            generatingPaths = Set(sources.map(\.path))
+            invalidateAIGenerations()
+            let generationID = beginAIGeneration(owning: Set(sources.map(\.path)))
             statusMessage = "Generating \(sources.count) icons…"
-            aiTask = Task { [weak self] in
+            aiGenerationTasks[generationID] = Task { [weak self] in
                 await self?.runAIGeneration(
                     sources: sources,
                     stylePrompt: stylePrompt,
                     strength: strength,
                     apiKey: apiKey,
-                    modelId: modelId
+                    modelId: modelId,
+                    generationID: generationID
                 )
             }
         } else {
             // A single-icon redo runs alongside whatever else is in flight.
-            generatingPaths.formUnion(sources.map(\.path))
+            let generationID = beginAIGeneration(owning: Set(sources.map(\.path)))
             statusMessage = "Regenerating \(sources[0].name)…"
-            Task { [weak self] in
+            aiGenerationTasks[generationID] = Task { [weak self] in
                 await self?.runAIGeneration(
                     sources: sources,
                     stylePrompt: stylePrompt,
                     strength: strength,
                     apiKey: apiKey,
-                    modelId: modelId
+                    modelId: modelId,
+                    generationID: generationID
                 )
             }
         }
@@ -222,12 +227,94 @@ final class DockPaletteModel {
         let bitmap: IconBitmap
     }
 
+    private enum AIGenerationCommit {
+        case success
+        case failure(message: String)
+        case cancelled
+    }
+
+    private func beginAIGeneration(owning paths: Set<String>) -> Int {
+        nextAIGenerationID += 1
+        let generationID = nextAIGenerationID
+        let previousIDs = Set(paths.compactMap { aiGenerationOwners[$0] })
+
+        generatingPaths.formUnion(paths)
+        for path in paths {
+            aiGenerationOwners[path] = generationID
+        }
+        for previousID in previousIDs {
+            cancelAIGenerationIfUnowned(previousID)
+        }
+        return generationID
+    }
+
+    private func invalidateAIGenerations() {
+        for task in aiGenerationTasks.values {
+            task.cancel()
+        }
+        aiGenerationTasks = [:]
+        aiGenerationOwners = [:]
+        generatingPaths = []
+    }
+
+    private func invalidateAIGeneration(forAppPath path: String) {
+        guard let generationID = aiGenerationOwners.removeValue(forKey: path) else {
+            generatingPaths.remove(path)
+            return
+        }
+        generatingPaths.remove(path)
+        cancelAIGenerationIfUnowned(generationID)
+    }
+
+    private func cancelAIGenerationIfUnowned(_ generationID: Int) {
+        guard !aiGenerationOwners.values.contains(generationID) else { return }
+        aiGenerationTasks[generationID]?.cancel()
+        aiGenerationTasks[generationID] = nil
+    }
+
+    private func commitAIGenerationResult(
+        _ result: Result<IconBitmap, any Error>,
+        forPath path: String,
+        generationID: Int
+    ) -> AIGenerationCommit? {
+        guard aiGenerationOwners[path] == generationID else { return nil }
+        aiGenerationOwners.removeValue(forKey: path)
+        generatingPaths.remove(path)
+
+        switch result {
+        case .success(let bitmap):
+            aiResults[path] = bitmap
+            hasUnsavedAIResults = true
+            GeneratedIconStore.save(bitmap, forAppAt: path)
+            if style == .ai, let app = apps.first(where: { $0.path == path }) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    previews[app.id] = bitmap
+                }
+            }
+            return .success
+        case .failure(let error):
+            guard !(error is CancellationError) else { return .cancelled }
+            return .failure(message: error.localizedDescription)
+        }
+    }
+
+    private func finishAIGeneration(_ generationID: Int, paths: [String]) -> Bool {
+        let hadTask = aiGenerationTasks[generationID] != nil
+        for path in paths where aiGenerationOwners[path] == generationID {
+            aiGenerationOwners.removeValue(forKey: path)
+            generatingPaths.remove(path)
+        }
+        aiGenerationTasks[generationID] = nil
+        return hadTask
+    }
+
     private func runAIGeneration(
         sources: [AISource],
         stylePrompt: String,
         strength: Double,
         apiKey: String,
-        modelId: String
+        modelId: String,
+        generationID: Int
     ) async {
         var failures: [String] = []
         var firstError: String?
@@ -259,32 +346,31 @@ final class DockPaletteModel {
                 // A cancelled run no longer owns these paths — a newer run may
                 // be tracking them.
                 if Task.isCancelled { continue }
-                generatingPaths.remove(path)
-                switch result {
-                case .success(let bitmap):
+                guard let commit = commitAIGenerationResult(
+                    result,
+                    forPath: path,
+                    generationID: generationID
+                ) else {
+                    continue
+                }
+                switch commit {
+                case .success:
                     succeeded += 1
-                    aiResults[path] = bitmap
-                    hasUnsavedAIResults = true
-                    GeneratedIconStore.save(bitmap, forAppAt: path)
-                    if style == .ai, let app = apps.first(where: { $0.path == path }) {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            previews[app.id] = bitmap
-                        }
-                    }
-                case .failure(let error):
-                    guard !(error is CancellationError) else { continue }
+                case .failure(let message):
                     failures.append(name)
                     if firstError == nil {
-                        firstError = error.localizedDescription
+                        firstError = message
                     }
+                case .cancelled:
+                    break
                 }
                 addNext()
             }
         }
 
         // Only clear this run's paths — and only if this run wasn't replaced.
-        guard !Task.isCancelled else { return }
-        generatingPaths.subtract(sources.map(\.path))
+        guard finishAIGeneration(generationID, paths: sources.map(\.path)),
+              !Task.isCancelled else { return }
         var parts = ["AI-styled \(succeeded) of \(sources.count) icons."]
         if !failures.isEmpty {
             parts.append("Failed: \(failures.joined(separator: ", ")).")
@@ -351,6 +437,7 @@ final class DockPaletteModel {
     /// Drops one generated icon — the grid falls back to the app's current
     /// icon and Apply will leave that app untouched.
     func discardAIResult(forAppPath path: String) {
+        invalidateAIGeneration(forAppPath: path)
         aiResults.removeValue(forKey: path)
         GeneratedIconStore.delete(forAppAt: path)
         if aiResults.isEmpty {
@@ -363,6 +450,7 @@ final class DockPaletteModel {
     }
 
     func discardAllAIResults() {
+        invalidateAIGenerations()
         aiResults = [:]
         GeneratedIconStore.deleteAll()
         hasUnsavedAIResults = false
@@ -401,6 +489,7 @@ final class DockPaletteModel {
             statusMessage = "“\(collection.name)” has no readable icons."
             return
         }
+        invalidateAIGenerations()
         GeneratedIconStore.deleteAll()
         for (path, bitmap) in icons {
             GeneratedIconStore.save(bitmap, forAppAt: path)
