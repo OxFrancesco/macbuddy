@@ -1,6 +1,6 @@
 import Foundation
 
-struct ProjectEntry: Identifiable, Equatable {
+nonisolated struct ProjectEntry: Identifiable, Equatable, Sendable {
     let url: URL
     let modifiedAt: Date?
 
@@ -10,7 +10,8 @@ struct ProjectEntry: Identifiable, Equatable {
 
 /// Lists the project folders inside the configured projects folder, most
 /// recently modified first so the search panel starts on recent work.
-enum ProjectScanner {
+/// Nonisolated so the directory enumeration can run off the main actor.
+nonisolated enum ProjectScanner {
     static func entries(in folder: URL) -> [ProjectEntry] {
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]
         let contents = (try? FileManager.default.contentsOfDirectory(

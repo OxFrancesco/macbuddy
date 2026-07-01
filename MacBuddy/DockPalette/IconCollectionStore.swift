@@ -1,5 +1,5 @@
-import AppKit
 import CryptoKit
+import Foundation
 
 /// A named snapshot of AI-generated icons. Generations are expensive
 /// (minutes per icon), so saved sets are kept immutable — loading one copies
@@ -16,7 +16,7 @@ nonisolated struct IconCollection: Identifiable, Sendable {
 
 /// Persists icon collections, one folder per collection: a manifest plus the
 /// icon PNGs, keyed by SHA256 of the app path like the working-set stores.
-enum IconCollectionStore {
+nonisolated enum IconCollectionStore {
     private struct Manifest: Codable {
         var name: String
         var prompt: String
@@ -50,7 +50,10 @@ enum IconCollectionStore {
         .sorted { $0.createdAt > $1.createdAt }
     }
 
-    static func save(name: String, prompt: String, icons: [String: IconBitmap]) -> IconCollection? {
+    /// Runs off the main actor — encoding a full set of 1024px PNGs is too
+    /// heavy for the main thread.
+    @concurrent
+    static func save(name: String, prompt: String, icons: [String: IconBitmap]) async -> IconCollection? {
         let id = UUID()
         let createdAt = Date.now
         let sortedIcons = icons.sorted { $0.key < $1.key }
@@ -61,8 +64,7 @@ enum IconCollectionStore {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: temporaryFolder, withIntermediateDirectories: false)
             for (path, bitmap) in sortedIcons {
-                let rep = NSBitmapImageRep(cgImage: bitmap.image)
-                guard let png = rep.representation(using: .png, properties: [:]) else {
+                guard let png = IconPNG.data(from: bitmap.image) else {
                     throw SaveError.pngEncodingFailed(path)
                 }
                 try png.write(to: iconURL(in: temporaryFolder, appPath: path), options: .atomic)
@@ -79,24 +81,27 @@ enum IconCollectionStore {
         return IconCollection(id: id, name: name, prompt: prompt, createdAt: createdAt, appPaths: appPaths)
     }
 
-    /// Full-resolution icons keyed by app path.
-    static func icons(for collection: IconCollection) -> [String: IconBitmap] {
+    /// Full-resolution icons keyed by app path, decoded off the main actor.
+    @concurrent
+    static func icons(for collection: IconCollection) async -> [String: IconBitmap] {
         let folder = folderURL(for: collection.id)
         var result: [String: IconBitmap] = [:]
         for path in collection.appPaths {
-            guard let image = NSImage(contentsOf: iconURL(in: folder, appPath: path)),
-                  let bitmap = IconRenderer.bitmap(from: image, pixelSize: 1024) else { continue }
-            result[path] = bitmap
+            guard let image = IconPNG.image(contentsOf: iconURL(in: folder, appPath: path)) else { continue }
+            result[path] = IconBitmap(image: image)
         }
         return result
     }
 
-    /// Small previews for the collections list.
+    /// Small previews for the collections list, downsampled at decode time.
     static func thumbnails(for collection: IconCollection, limit: Int, pixelSize: Int) -> [IconBitmap] {
         let folder = folderURL(for: collection.id)
         return collection.appPaths.prefix(limit).compactMap { path in
-            guard let image = NSImage(contentsOf: iconURL(in: folder, appPath: path)) else { return nil }
-            return IconRenderer.bitmap(from: image, pixelSize: pixelSize)
+            guard let image = IconPNG.image(
+                contentsOf: iconURL(in: folder, appPath: path),
+                maxPixelSize: pixelSize
+            ) else { return nil }
+            return IconBitmap(image: image)
         }
     }
 

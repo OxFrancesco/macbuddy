@@ -1,6 +1,8 @@
 import AppKit
 
-enum TerminalApp: String, CaseIterable, Identifiable {
+/// Nonisolated so `isInstalled` (a LaunchServices round-trip) is callable from
+/// the concurrent executor as well as the UI.
+nonisolated enum TerminalApp: String, CaseIterable, Identifiable {
     case terminal
     case iterm2
     case ghostty

@@ -43,6 +43,7 @@ targets:
       - path: MacBuddyTests
       - path: MacBuddy/MenuBarIcons/MenuBarIcon.swift
       - path: MacBuddy/MenuBarIcons/MenuBarIconStore.swift
+      - path: MacBuddy/DockPalette/IconPNG.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.francescooddo.macbuddy.tests

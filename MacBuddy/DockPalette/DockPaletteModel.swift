@@ -6,6 +6,7 @@ import SwiftUI
 final class DockPaletteModel {
     private(set) var apps: [DockApp] = []
     private(set) var previews: [String: IconBitmap] = [:]
+    private(set) var isLoading = false
     private(set) var isBusy = false
     private(set) var statusMessage: String?
     private(set) var styledPaths: [String]
@@ -40,6 +41,7 @@ final class DockPaletteModel {
     var falModelId: String { defaults.string(forKey: Self.falModelKey) ?? Self.defaultFalModel }
 
     private var appsVersion = 0
+    private var reloadID = 0
     private let defaults = UserDefaults.standard
     private static let styledPathsKey = "styledAppPaths"
     private static let aiPromptKey = "aiStylePrompt"
@@ -75,28 +77,29 @@ final class DockPaletteModel {
         }
     }
 
+    /// Kicks the whole load — Dock read, icon snapshots, restored
+    /// generations, permission probe — off the main thread, then applies the
+    /// result if no newer reload superseded it.
     func reload() {
         invalidateAIGenerations()
-        apps = DockReader.dockApps()
-        previews = [:]
-        appsVersion += 1
         statusMessage = nil
-        // Snapshot pristine icons before any styling touches them, so re-runs
-        // never re-process an already-styled icon.
-        OriginalIconStore.ensureCached(appPaths: apps.map(\.path), styledPaths: Set(styledPaths))
-        // Restore previously generated AI icons so they can be reviewed,
-        // applied, or discarded across launches.
-        var restored: [String: IconBitmap] = [:]
-        for app in apps {
-            if let bitmap = GeneratedIconStore.bitmap(forAppAt: app.path) {
-                restored[app.path] = bitmap
-            }
-        }
-        aiResults = restored
-        collections = IconCollectionStore.list()
         falKeyAvailable = FalKeyStore.keyIsAvailable
-        withAnimation(.easeInOut(duration: 0.25)) {
-            needsAppManagementPermission = !hasAppManagementAccess()
+        isLoading = true
+        reloadID += 1
+        let requestID = reloadID
+        let styled = Set(styledPaths)
+        Task {
+            let state = await DockStateLoader.load(styledPaths: styled)
+            guard requestID == reloadID else { return }
+            isLoading = false
+            apps = state.apps
+            previews = [:]
+            appsVersion += 1
+            aiResults = state.generated
+            collections = state.collections
+            withAnimation(.easeInOut(duration: 0.25)) {
+                needsAppManagementPermission = !state.hasAppManagementAccess
+            }
         }
     }
 
@@ -108,22 +111,6 @@ final class DockPaletteModel {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    /// Changing another app's icon writes into its bundle, which macOS gates
-    /// behind the App Management permission. POSIX writability checks pass
-    /// without it, so probe with a real write — this also makes MacBuddy show
-    /// up in the App Management list in System Settings.
-    private func hasAppManagementAccess() -> Bool {
-        guard let target = apps.first(where: \.isCustomizable) else { return true }
-        let probePath = URL(filePath: target.path)
-            .appending(path: ".macbuddy-write-probe")
-            .path(percentEncoded: false)
-        let created = FileManager.default.createFile(atPath: probePath, contents: Data())
-        if created {
-            try? FileManager.default.removeItem(atPath: probePath)
-        }
-        return created
     }
 
     func refreshPreviews() async {
@@ -177,54 +164,36 @@ final class DockPaletteModel {
             statusMessage = "Add your fal.ai API key first (key button on the right)."
             return
         }
-        let candidates = apps.filter { app in
-            app.isCustomizable && (paths?.contains(app.path) ?? true)
+        let candidates = apps
+            .filter { $0.isCustomizable && (paths?.contains($0.path) ?? true) }
+            .map { AICandidate(path: $0.path, name: $0.name) }
+        guard !candidates.isEmpty else { return }
+        if paths == nil {
+            // A full run replaces any previous one; a single-icon redo runs
+            // alongside whatever else is in flight.
+            invalidateAIGenerations()
         }
-        let sources = candidates.compactMap { app -> AISource? in
-            guard let bitmap = OriginalIconStore.originalBitmap(forAppAt: app.path, pixelSize: AIIconStylist.canvasSize) else {
-                return nil
-            }
-            return AISource(path: app.path, name: app.name, bitmap: bitmap)
-        }
-        guard !sources.isEmpty else { return }
+        let generationID = beginAIGeneration(owning: Set(candidates.map(\.path)))
+        statusMessage = paths == nil
+            ? "Generating \(candidates.count) icons…"
+            : "Regenerating \(candidates[0].name)…"
         let strength = aiStrength
         let modelId = falModelId
-        if paths == nil {
-            // A full run replaces any previous one.
-            invalidateAIGenerations()
-            let generationID = beginAIGeneration(owning: Set(sources.map(\.path)))
-            statusMessage = "Generating \(sources.count) icons…"
-            aiGenerationTasks[generationID] = Task { [weak self] in
-                await self?.runAIGeneration(
-                    sources: sources,
-                    stylePrompt: stylePrompt,
-                    strength: strength,
-                    apiKey: apiKey,
-                    modelId: modelId,
-                    generationID: generationID
-                )
-            }
-        } else {
-            // A single-icon redo runs alongside whatever else is in flight.
-            let generationID = beginAIGeneration(owning: Set(sources.map(\.path)))
-            statusMessage = "Regenerating \(sources[0].name)…"
-            aiGenerationTasks[generationID] = Task { [weak self] in
-                await self?.runAIGeneration(
-                    sources: sources,
-                    stylePrompt: stylePrompt,
-                    strength: strength,
-                    apiKey: apiKey,
-                    modelId: modelId,
-                    generationID: generationID
-                )
-            }
+        aiGenerationTasks[generationID] = Task { [weak self] in
+            await self?.runAIGeneration(
+                candidates: candidates,
+                stylePrompt: stylePrompt,
+                strength: strength,
+                apiKey: apiKey,
+                modelId: modelId,
+                generationID: generationID
+            )
         }
     }
 
-    private struct AISource: Sendable {
+    private struct AICandidate: Sendable {
         let path: String
         let name: String
-        let bitmap: IconBitmap
     }
 
     private enum AIGenerationCommit {
@@ -273,7 +242,7 @@ final class DockPaletteModel {
     }
 
     private func commitAIGenerationResult(
-        _ result: Result<IconBitmap, any Error>,
+        _ result: Result<AIIconGenerator.Output, any Error>,
         forPath path: String,
         generationID: Int
     ) -> AIGenerationCommit? {
@@ -282,13 +251,19 @@ final class DockPaletteModel {
         generatingPaths.remove(path)
 
         switch result {
-        case .success(let bitmap):
-            aiResults[path] = bitmap
+        case .success(let output):
+            aiResults[path] = output.bitmap
             hasUnsavedAIResults = true
-            GeneratedIconStore.save(bitmap, forAppAt: path)
+            // The PNG was encoded off-main by the generator; committing is a
+            // plain (atomic) file write.
+            if let pngData = output.pngData {
+                GeneratedIconStore.save(pngData: pngData, forAppAt: path)
+            } else {
+                GeneratedIconStore.save(output.bitmap, forAppAt: path)
+            }
             if style == .ai, let app = apps.first(where: { $0.path == path }) {
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    previews[app.id] = bitmap
+                    previews[app.id] = output.bitmap
                 }
             }
             return .success
@@ -309,7 +284,7 @@ final class DockPaletteModel {
     }
 
     private func runAIGeneration(
-        sources: [AISource],
+        candidates: [AICandidate],
         stylePrompt: String,
         strength: Double,
         apiKey: String,
@@ -320,21 +295,21 @@ final class DockPaletteModel {
         var firstError: String?
         var succeeded = 0
 
-        await withTaskGroup(of: (String, String, Result<IconBitmap, any Error>).self) { group in
-            var iterator = sources.makeIterator()
+        await withTaskGroup(of: (String, String, Result<AIIconGenerator.Output, any Error>).self) { group in
+            var iterator = candidates.makeIterator()
             func addNext() {
                 guard let item = iterator.next() else { return }
                 group.addTask {
                     do {
-                        let bitmap = try await AIIconStylist.restyle(
-                            source: item.bitmap,
+                        let output = try await AIIconGenerator.generate(
+                            appPath: item.path,
                             appName: item.name,
                             stylePrompt: stylePrompt,
                             strength: strength,
                             apiKey: apiKey,
                             modelId: modelId
                         )
-                        return (item.path, item.name, .success(bitmap))
+                        return (item.path, item.name, .success(output))
                     } catch {
                         return (item.path, item.name, .failure(error))
                     }
@@ -369,9 +344,9 @@ final class DockPaletteModel {
         }
 
         // Only clear this run's paths — and only if this run wasn't replaced.
-        guard finishAIGeneration(generationID, paths: sources.map(\.path)),
+        guard finishAIGeneration(generationID, paths: candidates.map(\.path)),
               !Task.isCancelled else { return }
-        var parts = ["AI-styled \(succeeded) of \(sources.count) icons."]
+        var parts = ["AI-styled \(succeeded) of \(candidates.count) icons."]
         if !failures.isEmpty {
             parts.append("Failed: \(failures.joined(separator: ", ")).")
             if let firstError {
@@ -387,7 +362,7 @@ final class DockPaletteModel {
     }
 
     func applyToDock() async {
-        guard hasAppManagementAccess() else {
+        guard DockStateLoader.hasAppManagementAccess(apps: apps) else {
             withAnimation(.easeInOut(duration: 0.25)) {
                 needsAppManagementPermission = true
             }
@@ -470,52 +445,63 @@ final class DockPaletteModel {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !aiResults.isEmpty else { return }
         let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let collection = IconCollectionStore.save(name: name, prompt: prompt, icons: aiResults) else {
-            statusMessage = "Couldn't save the collection."
-            return
+        let snapshot = aiResults
+        Task {
+            guard let collection = await IconCollectionStore.save(name: name, prompt: prompt, icons: snapshot) else {
+                statusMessage = "Couldn't save the collection."
+                return
+            }
+            collections.insert(collection, at: 0)
+            // A generation may have landed while the save was writing — only
+            // mark the working set clean if it still matches what we saved.
+            if aiResults.count == snapshot.count,
+               aiResults.allSatisfy({ snapshot[$0.key]?.image === $0.value.image }) {
+                hasUnsavedAIResults = false
+            }
+            statusMessage = "Saved “\(collection.name)” — \(collection.iconCount) icons."
+            ToastPresenter.show(message: "Collection “\(collection.name)” saved", systemImage: "square.stack.3d.up.fill")
         }
-        collections.insert(collection, at: 0)
-        hasUnsavedAIResults = false
-        statusMessage = "Saved “\(collection.name)” — \(collection.iconCount) icons."
-        ToastPresenter.show(message: "Collection “\(collection.name)” saved", systemImage: "square.stack.3d.up.fill")
     }
 
     /// Makes a saved collection the working set: its icons become the live
     /// previews and what Apply writes, and its prompt comes back so
     /// per-icon regeneration matches the set's style.
     func loadCollection(_ collection: IconCollection) {
-        let icons = IconCollectionStore.icons(for: collection)
-        guard !icons.isEmpty else {
-            statusMessage = "“\(collection.name)” has no readable icons."
-            return
-        }
-        invalidateAIGenerations()
-        GeneratedIconStore.deleteAll()
-        for (path, bitmap) in icons {
-            GeneratedIconStore.save(bitmap, forAppAt: path)
-        }
-        aiResults = icons
-        hasUnsavedAIResults = false
-        if !collection.prompt.isEmpty {
-            aiPrompt = collection.prompt
-        }
-        style = .ai
-        var aiPreviews: [String: IconBitmap] = [:]
-        for app in apps {
-            if let result = icons[app.path] {
-                aiPreviews[app.id] = result
+        Task {
+            let icons = await IconCollectionStore.icons(for: collection)
+            guard !icons.isEmpty else {
+                statusMessage = "“\(collection.name)” has no readable icons."
+                return
             }
+            invalidateAIGenerations()
+            // Persist the swap in the background — the in-memory working set
+            // below is what the UI and Apply read.
+            Task {
+                await GeneratedIconStore.replaceAll(with: icons)
+            }
+            aiResults = icons
+            hasUnsavedAIResults = false
+            if !collection.prompt.isEmpty {
+                aiPrompt = collection.prompt
+            }
+            style = .ai
+            var aiPreviews: [String: IconBitmap] = [:]
+            for app in apps {
+                if let result = icons[app.path] {
+                    aiPreviews[app.id] = result
+                }
+            }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                previews = aiPreviews
+            }
+            let missing = icons.count - aiPreviews.count
+            var parts = ["Loaded “\(collection.name)” — \(aiPreviews.count) icons ready."]
+            if missing > 0 {
+                parts.append("\(missing) saved \(missing == 1 ? "app is" : "apps are") no longer in your Dock.")
+            }
+            statusMessage = parts.joined(separator: " ")
+            ToastPresenter.show(message: "Loaded “\(collection.name)” — review, then Apply to Dock", systemImage: "square.stack.3d.up.fill")
         }
-        withAnimation(.easeInOut(duration: 0.18)) {
-            previews = aiPreviews
-        }
-        let missing = icons.count - aiPreviews.count
-        var parts = ["Loaded “\(collection.name)” — \(aiPreviews.count) icons ready."]
-        if missing > 0 {
-            parts.append("\(missing) saved \(missing == 1 ? "app is" : "apps are") no longer in your Dock.")
-        }
-        statusMessage = parts.joined(separator: " ")
-        ToastPresenter.show(message: "Loaded “\(collection.name)” — review, then Apply to Dock", systemImage: "square.stack.3d.up.fill")
     }
 
     func deleteCollection(_ collection: IconCollection) {
@@ -544,7 +530,7 @@ final class DockPaletteModel {
         if style == .ai {
             return aiResults[app.path]
         }
-        guard let source = OriginalIconStore.originalBitmap(forAppAt: app.path, pixelSize: 1024) else {
+        guard let source = await OriginalIconStore.loadOriginalBitmap(forAppAt: app.path, pixelSize: 1024) else {
             return nil
         }
         return await IconStyler.render(source: source, style: style, tint: tint, intensity: intensity)

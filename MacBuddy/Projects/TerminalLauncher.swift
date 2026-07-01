@@ -1,4 +1,5 @@
-import AppKit
+import Foundation
+import OSAKit
 
 /// Opens the chosen terminal in a directory and injects the configured command.
 /// Terminal.app and iTerm2 are driven via AppleScript. The CLI terminals get a
@@ -6,8 +7,12 @@ import AppKit
 /// Ghostty's macOS launcher space-joins multi-token `-e` commands without
 /// preserving quoting, so anything with embedded spaces or semicolons gets
 /// mangled — a zero-argument script sidesteps that entirely.
-enum TerminalLauncher {
-    static func launch(_ terminal: TerminalApp, at directory: URL, command rawCommand: String) throws {
+nonisolated enum TerminalLauncher {
+    /// Runs on the concurrent executor: the AppleScript round-trip blocks until
+    /// the terminal replies (seconds, if it's still booting), and the script
+    /// write + `open` spawn hit the disk — none of it belongs on the main actor.
+    @concurrent
+    static func launch(_ terminal: TerminalApp, at directory: URL, command rawCommand: String) async throws {
         guard terminal.isInstalled else {
             throw MacBuddyError.terminalNotInstalled(terminal.displayName)
         }
@@ -56,18 +61,21 @@ enum TerminalLauncher {
         "\"" + string.replacing("\\", with: "\\\\").replacing("\"", with: "\\\"") + "\""
     }
 
+    /// OSAScript with a private language instance, not NSAppleScript: the
+    /// latter shares the process-wide component instance and is main-thread
+    /// only, which would put the blocking Apple Event round-trip back on the
+    /// UI thread.
     private static func runAppleScript(_ source: String, appName: String) throws {
-        guard let script = NSAppleScript(source: source) else {
-            throw MacBuddyError.scriptFailed("Couldn't build the launch script.")
-        }
+        let languageInstance = OSALanguage(forName: "AppleScript").map(OSALanguageInstance.init(language:))
+        let script = OSAScript(source: source, from: nil, languageInstance: languageInstance, using: [])
         var errorInfo: NSDictionary?
         script.executeAndReturnError(&errorInfo)
         if let errorInfo {
-            let code = errorInfo["NSAppleScriptErrorNumber"] as? Int ?? 0
+            let code = errorInfo[OSAScriptErrorNumberKey] as? Int ?? 0
             if code == -1743 {
                 throw MacBuddyError.automationDenied(appName)
             }
-            let message = errorInfo["NSAppleScriptErrorMessage"] as? String ?? "Unknown AppleScript error \(code)."
+            let message = errorInfo[OSAScriptErrorMessageKey] as? String ?? "Unknown AppleScript error \(code)."
             throw MacBuddyError.scriptFailed(message)
         }
     }

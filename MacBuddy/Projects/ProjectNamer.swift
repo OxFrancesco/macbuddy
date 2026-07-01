@@ -1,6 +1,7 @@
 import Foundation
 
-enum ProjectNamer {
+/// Nonisolated so the directory listing and mkdir can run off the main actor.
+nonisolated enum ProjectNamer {
     static func suggestedName(in folder: URL) -> String {
         let existing = existingNames(in: folder)
         var index = 1

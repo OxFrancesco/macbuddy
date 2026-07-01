@@ -5,6 +5,9 @@ struct ProjectsView: View {
     @Environment(NewProjectCoordinator.self) private var coordinator
     @Environment(OpenProjectCoordinator.self) private var openCoordinator
     @State private var isChoosingFolder = false
+    /// `isInstalled` round-trips to LaunchServices; resolve it once per
+    /// appearance instead of twice per terminal on every grid render.
+    @State private var installedTerminals: Set<TerminalApp> = []
 
     private let commandPresets = ["claude", "claude --dangerously-skip-permissions", "codex", "gemini", "opencode"]
 
@@ -27,6 +30,7 @@ struct ProjectsView: View {
             .frame(maxWidth: .infinity)
         }
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder], onCompletion: handleFolderSelection)
+        .onAppear { installedTerminals = Set(TerminalApp.allCases.filter(\.isInstalled)) }
     }
 
     // MARK: Folder
@@ -60,6 +64,7 @@ struct ProjectsView: View {
                     TerminalOption(
                         terminal: terminal,
                         isSelected: settings.wrappedValue.terminal == terminal,
+                        isInstalled: installedTerminals.contains(terminal),
                         action: { settings.wrappedValue.terminal = terminal }
                     )
                 }
@@ -154,6 +159,7 @@ struct ProjectsView: View {
 private struct TerminalOption: View {
     let terminal: TerminalApp
     let isSelected: Bool
+    let isInstalled: Bool
     let action: () -> Void
 
     var body: some View {
@@ -167,12 +173,12 @@ private struct TerminalOption: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
-        .help(terminal.isInstalled ? terminal.displayName : "\(terminal.displayName) is not installed")
+        .help(isInstalled ? terminal.displayName : "\(terminal.displayName) is not installed")
     }
 
     private var foreground: Color {
         if isSelected { return Theme.amber }
-        return terminal.isInstalled ? Theme.textSecondary : Theme.textTertiary.opacity(0.6)
+        return isInstalled ? Theme.textSecondary : Theme.textTertiary.opacity(0.6)
     }
 }
 

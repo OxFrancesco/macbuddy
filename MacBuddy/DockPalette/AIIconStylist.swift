@@ -1,7 +1,5 @@
 import CoreGraphics
 import Foundation
-import ImageIO
-import UniformTypeIdentifiers
 
 /// Restyles an app icon with an image-edit model: crops the icon artwork out
 /// of its transparent margins, sends it to fal.ai with the user's style
@@ -29,7 +27,7 @@ nonisolated enum AIIconStylist {
         let prepared = profile.acceptsAlphaInput
             ? cropped
             : flattenedAdaptive(cropped, size: canvasSize)
-        guard let prepared, let pngData = pngData(from: prepared) else {
+        guard let prepared, let pngData = IconPNG.data(from: prepared) else {
             throw FalClient.FalError(message: "Couldn't prepare the icon for editing.")
         }
         var generated = try await FalClient.editImage(
@@ -45,7 +43,7 @@ nonisolated enum AIIconStylist {
         // cut fails, composedIcon's corner extraction still handles it.
         let outputHasTransparency = hasMeaningfulTransparency(generated)
         if profile.shouldAttemptBackgroundRemoval(outputHasMeaningfulTransparency: outputHasTransparency),
-           let generatedPNG = self.pngData(from: generated),
+           let generatedPNG = IconPNG.data(from: generated),
            let cut = try? await FalClient.removeBackground(pngData: generatedPNG, apiKey: apiKey),
            profile.acceptsBackgroundRemovalResult(
                hasMeaningfulTransparency: hasMeaningfulTransparency(cut),
@@ -298,15 +296,5 @@ nonisolated enum AIIconStylist {
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )
-    }
-
-    private static func pngData(from image: CGImage) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            data, UTType.png.identifier as CFString, 1, nil
-        ) else { return nil }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return data as Data
     }
 }

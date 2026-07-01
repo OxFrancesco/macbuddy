@@ -2,7 +2,7 @@ import AppKit
 
 /// Reads the pinned apps from the Dock's preferences (com.apple.dock,
 /// persistent-apps) in Dock order.
-enum DockReader {
+nonisolated enum DockReader {
     static func dockApps() -> [DockApp] {
         guard let dockDefaults = UserDefaults(suiteName: "com.apple.dock"),
               let items = dockDefaults.array(forKey: "persistent-apps") as? [[String: Any]] else {

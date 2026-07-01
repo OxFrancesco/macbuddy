@@ -3,7 +3,6 @@ import ApplicationServices
 
 @MainActor
 final class MenuBarAccessibilityService {
-    private var elementsByID: [String: AXUIElement] = [:]
     private let appBundleIdentifier = Bundle.main.bundleIdentifier
 
     var isTrusted: Bool {
@@ -30,26 +29,24 @@ final class MenuBarAccessibilityService {
         }
     }
 
-    func scanMenuBarIcons(includeMacBuddy: Bool = false) -> [MenuBarIconSnapshot] {
-        let entries = MenuBarAccessibilityScanner.scanMenuBarIconEntries(
-            appBundleIdentifier: appBundleIdentifier,
-            includeMacBuddy: includeMacBuddy,
-            retainElements: true
-        )
-        elementsByID = [:]
-        for entry in entries {
-            if let element = entry.element {
-                elementsByID[entry.snapshot.id] = element
-            }
-        }
-        return entries.map(\.snapshot)
+    func activate(_ icon: MenuBarIconSnapshot) async -> Bool {
+        await Self.pressMenuBarItem(withID: icon.id, appBundleIdentifier: appBundleIdentifier)
     }
 
-    func activate(_ icon: MenuBarIconSnapshot) -> Bool {
-        if elementsByID[icon.id] == nil {
-            _ = scanMenuBarIcons(includeMacBuddy: false)
-        }
-        guard let element = elementsByID[icon.id] else {
+    /// Scan and press stay together on the concurrent executor: walking every
+    /// app's AX tree is the expensive part, and AXUIElement handles can't hop
+    /// actors, so the press happens where the scan found the element.
+    @concurrent
+    private nonisolated static func pressMenuBarItem(
+        withID iconID: String,
+        appBundleIdentifier: String?
+    ) async -> Bool {
+        let entries = MenuBarAccessibilityScanner.scanMenuBarIconEntries(
+            appBundleIdentifier: appBundleIdentifier,
+            includeMacBuddy: false,
+            retainElements: true
+        )
+        guard let element = entries.first(where: { $0.snapshot.id == iconID })?.element else {
             return false
         }
         return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success

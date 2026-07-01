@@ -12,6 +12,10 @@ struct ProjectSearchView: View {
     @State private var query = ""
     @State private var selectedIndex = 0
     @State private var hasAppeared = false
+    /// Cached per query change: hover and arrow-key selection updates
+    /// invalidate the body, and re-running the fuzzy match over every project
+    /// on each of those is wasted work.
+    @State private var results: [SearchResult]
     @FocusState private var isSearchFocused: Bool
 
     private struct SearchResult: Identifiable {
@@ -20,8 +24,20 @@ struct ProjectSearchView: View {
         var id: URL { entry.url }
     }
 
+    init(
+        projects: [ProjectEntry],
+        terminalName: String,
+        onSelect: @escaping (ProjectEntry) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.projects = projects
+        self.terminalName = terminalName
+        self.onSelect = onSelect
+        self.onCancel = onCancel
+        _results = State(initialValue: Self.results(matching: "", in: projects))
+    }
+
     var body: some View {
-        let results = self.results
         VStack(spacing: 0) {
             searchField
             divider
@@ -35,7 +51,10 @@ struct ProjectSearchView: View {
         .opacity(hasAppeared ? 1 : 0)
         .onExitCommand(perform: onCancel)
         .defaultFocus($isSearchFocused, true)
-        .onChange(of: query) { selectedIndex = 0 }
+        .onChange(of: query) {
+            selectedIndex = 0
+            results = Self.results(matching: query, in: projects)
+        }
         .task { animateIn() }
     }
 
@@ -153,7 +172,7 @@ struct ProjectSearchView: View {
         }
     }
 
-    private var results: [SearchResult] {
+    private static func results(matching query: String, in projects: [ProjectEntry]) -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             return projects.map { SearchResult(entry: $0, matchedOffsets: []) }
@@ -187,13 +206,11 @@ struct ProjectSearchView: View {
     }
 
     private func moveSelection(by delta: Int) {
-        let count = results.count
-        guard count > 0 else { return }
-        selectedIndex = max(0, min(clampedIndex(in: results) + delta, count - 1))
+        guard !results.isEmpty else { return }
+        selectedIndex = max(0, min(clampedIndex(in: results) + delta, results.count - 1))
     }
 
     private func openSelection() {
-        let results = self.results
         guard !results.isEmpty else { return }
         onSelect(results[clampedIndex(in: results)].entry)
     }

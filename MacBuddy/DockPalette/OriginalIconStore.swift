@@ -1,10 +1,10 @@
-import AppKit
 import CryptoKit
+import Foundation
 
 /// Caches each app's pristine icon before MacBuddy styles it. NSWorkspace
 /// returns the *custom* icon once one is applied, so styling twice would
 /// otherwise re-process an already-styled icon.
-enum OriginalIconStore {
+nonisolated enum OriginalIconStore {
     private static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appending(path: "MacBuddy/OriginalIcons", directoryHint: .isDirectory)
@@ -19,18 +19,23 @@ enum OriginalIconStore {
             guard !FileManager.default.fileExists(atPath: url.path) else { continue }
             guard !styledPaths.contains(path) else { continue }
             guard let bitmap = IconRenderer.iconBitmap(forFile: path, pixelSize: 1024) else { continue }
-            let rep = NSBitmapImageRep(cgImage: bitmap.image)
-            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            IconPNG.write(bitmap.image, to: url)
         }
+    }
+
+    /// Off-main variant of `originalBitmap` for the styling pipeline —
+    /// decoding a 1024px snapshot is too heavy for the main thread.
+    @concurrent
+    static func loadOriginalBitmap(forAppAt path: String, pixelSize: Int) async -> IconBitmap? {
+        originalBitmap(forAppAt: path, pixelSize: pixelSize)
     }
 
     /// The pristine icon at the requested size — cached snapshot if we have
     /// one, the live icon otherwise.
     static func originalBitmap(forAppAt path: String, pixelSize: Int) -> IconBitmap? {
         let url = cacheURL(forAppAt: path)
-        if let image = NSImage(contentsOf: url),
-           let bitmap = IconRenderer.bitmap(from: image, pixelSize: pixelSize) {
-            return bitmap
+        if let image = IconPNG.image(contentsOf: url, maxPixelSize: pixelSize) {
+            return IconBitmap(image: image)
         }
         return IconRenderer.iconBitmap(forFile: path, pixelSize: pixelSize)
     }

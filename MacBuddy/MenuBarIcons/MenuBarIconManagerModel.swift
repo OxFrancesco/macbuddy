@@ -156,10 +156,13 @@ final class MenuBarIconManagerModel {
         if icon.zone == .hidden, !hiddenItemsRevealed {
             revealHidden()
         }
-        if accessibilityService.activate(icon) {
-            statusMessage = "Opened \(icon.displayName)."
-        } else {
-            statusMessage = "Could not open \(icon.displayName)."
+        Task { [weak self] in
+            guard let self else { return }
+            if await accessibilityService.activate(icon) {
+                statusMessage = "Opened \(icon.displayName)."
+            } else {
+                statusMessage = "Could not open \(icon.displayName)."
+            }
         }
     }
 

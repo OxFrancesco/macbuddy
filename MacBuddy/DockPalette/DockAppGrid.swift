@@ -5,12 +5,20 @@ struct DockAppGrid: View {
 
     var body: some View {
         if model.apps.isEmpty {
-            ContentUnavailableView {
-                Label("No Dock apps", systemImage: "dock.rectangle")
-            } description: {
-                Text("MacBuddy couldn't read your Dock layout.")
+            // The Dock is read off the main thread — show progress instead of
+            // flashing the failure state while the first load is in flight.
+            if model.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView {
+                    Label("No Dock apps", systemImage: "dock.rectangle")
+                } description: {
+                    Text("MacBuddy couldn't read your Dock layout.")
+                }
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 16)], spacing: 24) {
