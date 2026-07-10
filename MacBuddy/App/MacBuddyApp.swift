@@ -24,6 +24,9 @@ struct MacBuddyApp: App {
         }
         HotKeyCenter.shared.register(settings.hotKey, for: .newProject)
         HotKeyCenter.shared.register(settings.openProjectHotKey, for: .openProject)
+        Task(priority: .utility) {
+            await AppliedIconPersistence.shared.reconcileAtStartupIfNeeded()
+        }
     }
 
     var body: some Scene {

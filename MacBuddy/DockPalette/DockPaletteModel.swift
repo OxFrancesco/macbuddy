@@ -10,6 +10,7 @@ final class DockPaletteModel {
     private(set) var isBusy = false
     private(set) var statusMessage: String?
     private(set) var styledPaths: [String]
+    private(set) var appliedIconAvailability = AppliedIconAvailability()
     private(set) var needsAppManagementPermission = false
 
     var style: IconStyle = .noir
@@ -35,6 +36,9 @@ final class DockPaletteModel {
     }
 
     var isGeneratingAI: Bool { !generatingPaths.isEmpty }
+    var canRestoreOriginalIcons: Bool {
+        !styledPaths.isEmpty || appliedIconAvailability.hasDurableRecords
+    }
 
     /// Override with `defaults write dev.francescooddo.macbuddy falModelId <id>`
     /// to try a different fal.ai image-to-image endpoint.
@@ -75,6 +79,11 @@ final class DockPaletteModel {
         if apps.isEmpty {
             reload()
         }
+    }
+
+    func refreshAppliedIconAvailability() async {
+        await AppliedIconPersistence.shared.reconcileAtStartupIfNeeded()
+        await appliedIconAvailability.refresh()
     }
 
     /// Kicks the whole load — Dock read, icon snapshots, restored
@@ -377,17 +386,32 @@ final class DockPaletteModel {
         let tintColor = TintColor(tint)
         var appliedPaths: [String] = []
         var failures: [String] = []
+        var applyRequests: [AppliedIconPersistence.ApplyRequest] = []
+        var requestedApps: [DockApp] = []
 
         for app in apps where app.isCustomizable {
             // In AI mode only apply icons the user generated and kept —
             // discarded or never-generated apps keep their current icon.
             if style == .ai, aiResults[app.path] == nil { continue }
             guard let styled = await styledBitmap(for: app, tint: tintColor),
-                  DockIconApplier.apply(styled, toAppAt: app.path) else {
+                  let pngData = IconPNG.data(from: styled.image) else {
                 failures.append(app.name)
                 continue
             }
-            appliedPaths.append(app.path)
+            applyRequests.append(.init(pngData: pngData, path: app.path))
+            requestedApps.append(app)
+        }
+
+        let outcomes = await AppliedIconPersistence.shared.applyPNGBatch(applyRequests)
+        for (app, outcome) in zip(requestedApps, outcomes) {
+            if outcome.succeeded {
+                appliedPaths.append(app.path)
+            } else {
+                failures.append(app.name)
+            }
+        }
+        if !applyRequests.isEmpty {
+            await appliedIconAvailability.refresh()
         }
 
         withAnimation(.easeInOut(duration: 0.25)) {
@@ -405,7 +429,6 @@ final class DockPaletteModel {
         }
         styledPaths = Array(Set(styledPaths).union(appliedPaths))
         defaults.set(styledPaths, forKey: Self.styledPathsKey)
-        DockIconApplier.relaunchDock()
         ToastPresenter.show(message: "Dock restyled — \(appliedPaths.count) icons updated", systemImage: "paintpalette.fill")
     }
 
@@ -510,18 +533,18 @@ final class DockPaletteModel {
         statusMessage = "Deleted “\(collection.name)”."
     }
 
-    func restoreOriginalIcons() {
-        var remaining: [String] = []
-        for path in styledPaths {
-            let removed = DockIconApplier.removeCustomIcon(atAppPath: path)
-            if !removed, FileManager.default.fileExists(atPath: path) {
-                remaining.append(path)
-            }
-        }
-        styledPaths = remaining
+    func restoreOriginalIcons() async {
+        isBusy = true
+        statusMessage = "Restoring original icons…"
+        defer { isBusy = false }
+
+        let result = await AppliedIconPersistence.shared.restoreOriginals(legacyPaths: styledPaths)
+        await appliedIconAvailability.refresh()
+        styledPaths = result.remainingLegacyPaths
         defaults.set(styledPaths, forKey: Self.styledPathsKey)
-        DockIconApplier.relaunchDock()
-        statusMessage = remaining.isEmpty ? "Restored original icons." : "Some icons couldn't be restored."
+        statusMessage = result.failedPaths.isEmpty
+            ? "Restored original icons."
+            : "Some icons couldn't be restored."
     }
 
     /// What Apply writes for one app: the cached AI render in AI mode, the

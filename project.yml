@@ -44,6 +44,14 @@ targets:
       - path: MacBuddy/MenuBarIcons/MenuBarIcon.swift
       - path: MacBuddy/MenuBarIcons/MenuBarIconStore.swift
       - path: MacBuddy/DockPalette/IconPNG.swift
+      - path: MacBuddy/DockPalette/IconBitmap.swift
+      - path: MacBuddy/DockPalette/DockIconApplier.swift
+      - path: MacBuddy/DockPalette/AppliedIconModels.swift
+      - path: MacBuddy/DockPalette/AppliedIconAvailability.swift
+      - path: MacBuddy/DockPalette/AppliedIconPersistence.swift
+      - path: MacBuddy/DockPalette/AppliedIconStore.swift
+      - path: MacBuddy/DockPalette/CustomIconInspector.swift
+      - path: MacBuddy/DockPalette/SignedAppMetadataReader.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.francescooddo.macbuddy.tests

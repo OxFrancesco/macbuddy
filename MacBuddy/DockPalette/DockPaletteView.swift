@@ -16,6 +16,7 @@ struct DockPaletteView: View {
             DockPaletteFooter(model: model)
         }
         .task { model.loadIfNeeded() }
+        .task { await model.refreshAppliedIconAvailability() }
         .task(id: model.previewKey) { await model.refreshPreviews() }
     }
 }

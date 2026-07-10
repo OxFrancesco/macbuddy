@@ -13,9 +13,9 @@ struct DockPaletteFooter: View {
             .fixedSize()
             .disabled(model.isBusy || model.apps.isEmpty || aiNotReady)
 
-            Button("Restore Originals", action: model.restoreOriginalIcons)
+            Button("Restore Originals", action: startRestore)
                 .buttonStyle(GhostButtonStyle())
-                .disabled(model.isBusy || model.styledPaths.isEmpty)
+                .disabled(model.isBusy || !model.canRestoreOriginalIcons)
 
             if model.isBusy {
                 ProgressView()
@@ -57,6 +57,12 @@ struct DockPaletteFooter: View {
     private func startApply() {
         Task {
             await model.applyToDock()
+        }
+    }
+
+    private func startRestore() {
+        Task {
+            await model.restoreOriginalIcons()
         }
     }
 }
